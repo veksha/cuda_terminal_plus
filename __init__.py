@@ -1,13 +1,15 @@
 import sys
 import datetime
 import os
-from time import sleep
+from time import sleep, time
 from subprocess import Popen, PIPE, STDOUT
 from threading import Thread, Lock
 
 import cudatext_keys as keys
 import cudatext_cmd as cmds
 from cudatext import *
+
+from .ansiterm import *
 
 fn_icon = os.path.join(os.path.dirname(__file__), 'terminal.png')
 fn_config = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal.ini')
@@ -261,6 +263,15 @@ class Command:
         env = os.environ
         if IS_MAC:
             env['PATH'] += ':/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin'
+            
+        """env['TERM'] = 'xterm-256color'
+        #env['TERM'] = 'xterm-color'
+        env['COLORFGBG'] = '15;0'
+        env['color_prompt']='yes'
+        env['force_color_prompt']='yes'
+        env['CLICOLOR']='1'
+        env['SHLVL']='1'
+        env['LS_COLORS']='rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.Z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:'"""
 
         shell = self.shell_win if IS_WIN else self.shell_mac if IS_MAC else self.shell_unix
 
@@ -295,7 +306,8 @@ class Command:
     def exec(self, s):
 
         if self.p and s:
-            self.p.stdin.write((s+'\n').encode(ENC))
+            #self.p.stdin.write((s+'\n').encode(ENC))
+            self.p.stdin.write((f'script --return --quiet -c "{s}" /dev/null\n').encode(ENC))
             self.p.stdin.flush()
 
 
@@ -550,20 +562,108 @@ class Command:
             self.input.set_caret(len(s), 0)
 
 
-    def update_output(self, s):
+    def update_output(self, s_):
 
+        s,tiles = self.parse_ansi_codes()
+        
         #bash gives tailing EOL
         if not IS_WIN:
-            s = s.rstrip('\n')
+            #s = s.rstrip('\n')
+            pass
 
         self.memo.set_prop(PROP_RO, False)
         self.memo.set_text_all(s)
+        self.apply_colors(tiles, self.PARSER_TERMINAL_W)
         self.memo.set_prop(PROP_RO, True)
 
         self.memo.cmd(cmds.cCommand_GotoTextEnd)
         self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-3)
 
 
+    PARSER_TERMINAL_W = 80
+    tag = 123456
+    broke_col = 0xff007f # pink
+    
+    colmapfg = { # xterm... https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
+        30: 0, # black     0 0 0
+        31: 0x0000cd, # red       205,0,0
+        32: 0x00cd00, # green     0 205 0
+        33: 0x00cdcd, # yellow    205 205 0
+        34: 0xee0000, # blue      0 0 238
+        35: 0xcd00cd, # magenta   205 0 205
+        36: 0xcdcd00, # cyan      0 205 205
+        37: 0xe5e5e5, # white     229 229 229
+        90: 0x7f7f7f, #### bblack 127 127 127 (bright)
+        91: 0x0000ff, # bred      255 0 0
+        92: 0x00ff00, # bgreen    0 255 0
+        93: 0x00ffff, # byellow   255 255 0
+        94: 0xff5c5c, # bblue     92 92 255
+        95: 0xff00ff, # bmagenta  255 0 255
+        96: 0xffff00, # bcyan     0 255 255
+        97: 0xffffff, # bwhite    255 255 255
+    }
+    colmapbg = { # colmapfg +10
+        40: 0, # blac
+        41:  0x0000cd,
+        42:  0x00cd00,
+        43:  0x00cdcd,
+        44:  0xee0000,
+        45:  0xcd00cd,
+        46:  0xcdcd00,
+        47:  0xe5e5e5,
+        100: 0x7f7f7f,
+        101: 0x0000ff,
+        102: 0x00ff00,
+        103: 0x00ffff,
+        104: 0xff5c5c,
+        105: 0xff00ff,
+        106: 0xffff00,
+        107: 0xffffff,
+    }
+    
+    def apply_colors(self, tiles, w):
+        for i,tile in enumerate(tiles):
+            tcol = tile.color
+            # colorize character if not default colors
+            if (tcol['fg'] != 37 
+                    or tcol['bg'] != 40
+                    or tcol['bold']
+                ):
+                x = i%w
+                y = i//w
+                fgcol = self.colmapfg.get(tcol['fg'], self.broke_col)
+                bgcol = self.colmapbg.get(tcol['bg'], self.broke_col)
+
+                self.memo.attr(MARKERS_ADD, tag=self.tag, x=x, y=y, len=1, 
+                        color_font=fgcol, color_bg=bgcol, font_bold=tcol['bold'])
+            
+        
+
+    'parsed:0.7448434829711914, color time:2.3532192707061768'
+    def parse_ansi_codes(self):
+        """returns:
+            uncolored_string,
+            tiles - contain single character, and its bg and fg colors and is bold 
+        """
+        # count number of lines in input for parser
+        termlines = 0
+        for bline in self.btext.split(b'\n'):
+          termlines += len(bline) // self.PARSER_TERMINAL_W + 1
+          
+        term = ansiterm.Ansiterm(rows=termlines, cols=self.PARSER_TERMINAL_W)
+        # ansiterm demands caret return after newline
+        term.feed(self.btext.replace(b'\n', b'\n\r').decode('utf-8'))
+        ts = term.get_tiles(0, termlines*self.PARSER_TERMINAL_W)
+        
+        # get text from parser without color garbage
+        ss = []
+        for i in range(termlines):
+            s = term.get_string(i*self.PARSER_TERMINAL_W, (i+1)*self.PARSER_TERMINAL_W).rstrip()
+            ss.append(s)
+        
+        return '\n'.join(ss), ts
+        
+ 
     def stop(self):
 
         try:
