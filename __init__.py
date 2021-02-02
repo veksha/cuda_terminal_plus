@@ -298,7 +298,7 @@ class Command:
 
         if self.p and s:
             #self.p.stdin.write((s+'\n').encode(ENC))
-            self.p.stdin.write((f'script --return --quiet -c "{s}" /dev/null\n').encode(ENC))
+            self.p.stdin.write(('script --return --quiet -c "' +s+ '" /dev/null\n').encode(ENC))
             self.p.stdin.flush()
 
 
