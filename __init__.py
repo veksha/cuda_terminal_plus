@@ -49,12 +49,20 @@ ColorRange = namedtuple('ColorRange', 'start length fgcol bgcol isbold')
 DEFAULT_FGCOL = 'default' # 37
 DEFAULT_BGCOL = 'default' # 40
 
+CMD_CLOSE_LAST_CUR_FILE = 101
+CMD_CLOSE_CURRENT = 102
+CMD_CUR_FILE_TERM_SWITCH = 103
+CMD_NEXT = 104
+CMD_PREVIOUS = 105
+CMD_EXEC_SEL = 106
+
 #DONE tab reorder
 
 #TODO self.memo width options
 #TODO implement apply_theme()
 #TODO hover statusbar migrate to proper
 #TODO terminal history
+#TODO input/statusbar positioning
 
 
 def log(s):
@@ -594,8 +602,6 @@ class TerminalBar:
             self.active_term.show()
             self.Cmd.memo = self.active_term.memo
             
-            # do not update sidebar if same term selected, otherwise - ACTIVATE -> show_terminal - loop
-            #if changing_term:
             self._update_term_icons()
 
     
@@ -606,6 +612,8 @@ class TerminalBar:
             print(f'termbar: show_terminal: NO TERMINALS')
             return
         if time() - self._start_time < 0.5:
+            print(f' sklipping shot_term: too soon')
+
             if self.terminals and self.active_term:
                 self._show_terminal(self.terminals.index(self.active_term))
             return
@@ -615,19 +623,46 @@ class TerminalBar:
             #ind = self.terminals.index(self.active_term)
         #elif ind == None:
             #ind = self.sidebar_names.index(name)
-        ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
+        if ind == None:
+            ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
         print(f'   => Show Term:{ind}, {name}')
         
         self._show_terminal(ind)
         
-    def remove_term(self, term):
+    def remove_term(self, term, show_next=False):
+        print('rt 0')
+
         term.close()
+        print('rt 1')
         if term.memo:
             dlg_proc(self.h_dlg, DLG_CTL_DELETE, name=term.memo_wgt_name)
+        print('rt 2')
             
         if term in self.terminals:
+            if show_next:
+                print(f' showing next')
+
+                curterms = [t for t in self.terminals  if t.filepath == term.filepath]
+                if len(curterms) > 1:
+                    choiceterms = curterms
+                else:
+                    choiceterms = self.terminals
+                    
+                ind = choiceterms.index(term)
+                termsn = len(choiceterms)
+                print(f' choice termsn:{termsn}')
+
+                if termsn > 1:
+                    nextind = ind - 1  if (ind == termsn - 1) else  ind + 1
+                    ind = self.terminals.index(choiceterms[nextind])
+                    self.show_terminal(ind=self.terminals.index(choiceterms[nextind]))
+                
             self.terminals.remove(term)
+        else:
+            print('!!! termo not ion terms')
+
             
+        print('rt 3')
         if self.active_term == term:
             self.active_term = None
         
@@ -687,6 +722,55 @@ class TerminalBar:
     def on_exit(self):
         for term in self.terminals:
             term.close()
+            
+    def run_cmd(self, cmd):
+        if cmd == CMD_CLOSE_LAST_CUR_FILE:
+            curfilepath = ed.get_filename()
+            if not curfilepath: return
+            
+            for term in reversed(self.terminals):
+                if term.filepath == curfilepath:
+                    print(f' cmd remove last: found: removing')
+
+                    self.remove_term(term, show_next=True)
+                    self.refresh()
+                    self._update_term_icons()
+                    self._update_statusbar_cells_bg()
+                    if self.active_term  and self.active_term in self.terminals: #TODO use find() or index()?
+                        ind = self.terminals.index(self.active_term)
+                        app_proc(PROC_BOTTOMPANEL_ACTIVATE, self.sidebar_names[ind])
+                    break
+            
+        elif cmd == CMD_CLOSE_CURRENT:
+            if self.active_term:
+                self.remove_term(self.active_term, show_next=True)
+                self.refresh()
+                self._update_term_icons()
+                self._update_statusbar_cells_bg()
+                if self.active_term  and self.active_term in self.terminals:
+                    ind = self.terminals.index(self.active_term)
+                    app_proc(PROC_BOTTOMPANEL_ACTIVATE, self.sidebar_names[ind])
+                
+        elif cmd == CMD_CUR_FILE_TERM_SWITCH:
+            '!!! CONTINUE'
+            pass
+            
+        elif cmd == CMD_NEXT:
+            if self.active_term and self.terminals and self.active_term in self.terminals: 
+                nexttermind = (self.terminals.index(self.active_term)+1) % len(self.terminals)
+                self._show_terminal(nexttermind)
+            
+        elif cmd == CMD_PREVIOUS:
+            if self.active_term and self.terminals and self.active_term in self.terminals: 
+                prevtermind = (self.terminals.index(self.active_term)+(len(self.terminals)-1)) % len(self.terminals)
+                self._show_terminal(prevtermind)
+            
+        elif cmd == CMD_EXEC_SEL:
+            if self.active_term and len(ed.get_carets()) == 1:
+                txt = ed.get_text_sel()
+                if '\n' not in txt:
+                    self.Cmd.run_cmd(txt)
+            
 
 class Command:
     
@@ -1216,7 +1300,6 @@ class Command:
         if answer == ID_OK:
             self.termbar.close_all()
 
-
     # active editor tab changed
     def on_tab_change(self, ed_self):
         if not self.termbar:
@@ -1328,6 +1411,27 @@ class Command:
         timer_proc(TIMER_STOP, self.dofocus, 0)
         dlg_proc(self.h_dlg, DLG_FOCUS)
 
+
+    def cmd_new_term(self):
+        self.termbar.new_term()
+        
+    def cmd_close_last_cur(self):
+        self.termbar.run_cmd(CMD_CLOSE_LAST_CUR_FILE)
+        
+    def cmd_close_cur_term(self):
+        self.termbar.run_cmd(CMD_CLOSE_CURRENT)
+        
+    def cmd_cur_file_term_switch(self):
+        self.termbar.run_cmd(CMD_CUR_FILE_TERM_SWITCH)
+        
+    def cmd_next(self):
+        self.termbar.run_cmd(CMD_NEXT)
+        
+    def cmd_previous(self):
+        self.termbar.run_cmd(CMD_PREVIOUS)
+        
+    def cmd_exec_selected(self):
+        self.termbar.run_cmd(CMD_EXEC_SEL)
 
 class AnsiParser:
 

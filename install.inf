@@ -12,8 +12,44 @@ events=on_exit,on_tab_change,on_tab_move
 
 [item2]
 section=commands
-caption=Terminal+
+caption=Terminal+\Open
 method=open
+
+[item3]
+section=commands
+caption=Terminal+\Add Terminal for current file
+method=cmd_new_term
+
+[item4]
+section=commands
+caption=Terminal+\Close last Terminal for current file
+method=cmd_close_last_cur
+
+[item5]
+section=commands
+caption=Terminal+\Close current Terminal
+method=cmd_close_cur_term
+
+[item6]
+section=commands
+caption=Terminal+\Curren File-Terminal switch
+method=cmd_cur_file_term_switch
+
+[item7]
+section=commands
+caption=Terminal+\Next
+method=cmd_next
+
+[item8]
+section=commands
+caption=Terminal+\Previous
+method=cmd_previous
+
+[item9]
+section=commands
+caption=Terminal+\Execute in terminal
+method=cmd_exec_selected
+
 
 [item10]
 section=commands
