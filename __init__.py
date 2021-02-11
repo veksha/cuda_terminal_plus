@@ -149,8 +149,8 @@ class Terminal:
                 self.cwd = os.path.split(filepath)[0]
             else:
                 self.filepath = ''
-                self.name = 'Empty'
-                self.cwd = 'Empty'
+                self.name = ''
+                self.cwd = ''
             self.lastactive = time()
         
         #TODO implement
@@ -216,6 +216,9 @@ class Terminal:
         if p_pid == 0:  # Child.
             if IS_MAC:
                 env['PATH'] += ':/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin'
+            
+            if self.cwd:
+                os.chdir(self.cwd)
                 
             env = dict(TERM="xterm-color", LC_ALL="en_GB.UTF-8",
                         COLUMNS=str(columns), LINES=str(lines))
@@ -650,7 +653,7 @@ class TerminalBar:
         # sort no-file terms | terms with editor tabs | terms without editor tabs
         fileinds = {}
         for i,h in enumerate(ed_handles()):
-            filepath = Editor(h).get_filename()  or filepath
+            filepath = Editor(h).get_filename()
             fileinds[filepath] = i
         
         l.sort(key=lambda term: fileinds.get(term.filepath, (-1  if not term.filepath else 1000)))
