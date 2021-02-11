@@ -37,7 +37,7 @@ import unicodedata
 import warnings
 from collections import deque, namedtuple, defaultdict
 
-from .wcwidth import wcwidth
+from wcwidth import wcwidth
 
 # There is no standard 2.X backport for ``lru_cache``.
 if sys.version_info >= (3, 2):
@@ -77,6 +77,7 @@ class Char(namedtuple("Char", [
     "underscore",
     "strikethrough",
     "reverse",
+    "blink",
 ])):
     """A single styled on-screen character.
 
@@ -93,14 +94,17 @@ class Char(namedtuple("Char", [
                                strike-through line. Defaults to ``False``.
     :param bool reverse: flag for swapping foreground and background colours
                          during rendering. Defaults to ``False``.
+    :param bool blink: flag for rendering the character blinked. Defaults to
+                       ``False``.
     """
     __slots__ = ()
 
     def __new__(cls, data, fg="default", bg="default", bold=False,
                 italics=False, underscore=False,
-                strikethrough=False, reverse=False):
+                strikethrough=False, reverse=False, blink=False):
         return super(Char, cls).__new__(cls, data, fg, bg, bold, italics,
-                                        underscore, strikethrough, reverse)
+                                        underscore, strikethrough, reverse,
+                                        blink)
 
 
 class Cursor(object):
@@ -193,7 +197,7 @@ class Screen(object):
     .. warning::
 
        :data:`~pyte.modes.LNM` is reset by default, to match VT220
-       specification. Unfortunatelly this makes :mod:`pyte` fail
+       specification. Unfortunately this makes :mod:`pyte` fail
        ``vttest`` for cursor movement.
 
     .. versionchanged:: 0.4.8
@@ -331,7 +335,8 @@ class Screen(object):
         :param int top: the smallest line number that is scrolled.
         :param int bottom: the biggest line number that is scrolled.
         """
-        if top is None and bottom is None:
+        # XXX 0 corresponds to the CSI with no parameters.
+        if (top is None or top == 0) and bottom is None:
             self.margins = None
             return
 
@@ -508,7 +513,7 @@ class Screen(object):
                         ._replace(data="")
             elif char_width == 0 and unicodedata.combining(char):
                 # A zero-cell character is combined with the previous
-                # character either on this or preceeding line.
+                # character either on this or preceding line.
                 if self.cursor.x:
                     last = line[self.cursor.x - 1]
                     normalized = unicodedata.normalize("NFC", last.data + char)
@@ -763,7 +768,7 @@ class Screen(object):
         for x in interval:
             line[x] = self.cursor.attrs
 
-    def erase_in_display(self, how=0, private=False):
+    def erase_in_display(self, how=0, *args, **kwargs):
         """Erases display in a specific way.
 
         Character attributes are set to cursor attributes.
@@ -779,6 +784,12 @@ class Screen(object):
               move.
         :param bool private: when ``True`` only characters marked as
                              eraseable are affected **not implemented**.
+
+        .. versionchanged:: 0.8.1
+
+           The method accepts any number of positional arguments as some
+           ``clear`` implementations include a ``;`` after the first
+           parameter causing the stream to assume a ``0`` second parameter.
         """
         if how == 0:
             interval = range(self.cursor.y + 1, self.lines)
@@ -985,9 +996,9 @@ class Screen(object):
                 attr = g.TEXT[attr]
                 replace[attr[1:]] = attr.startswith("+")
             elif attr in g.FG_AIXTERM:
-                replace.update(fg=g.FG_AIXTERM[attr], bold=True)
+                replace.update(fg=g.FG_AIXTERM[attr])
             elif attr in g.BG_AIXTERM:
-                replace.update(bg=g.BG_AIXTERM[attr], bold=True)
+                replace.update(bg=g.BG_AIXTERM[attr])
             elif attr in (g.FG_256, g.BG_256):
                 key = "fg" if attr == g.FG_256 else "bg"
                 try:
@@ -1190,9 +1201,9 @@ class HistoryScreen(Screen):
         super(HistoryScreen, self).reset()
         self._reset_history()
 
-    def erase_in_display(self, how=0):
+    def erase_in_display(self, how=0, *args, **kwargs):
         """Overloaded to reset history state."""
-        super(HistoryScreen, self).erase_in_display(how)
+        super(HistoryScreen, self).erase_in_display(how, *args, **kwargs)
 
         if how == 3:
             self._reset_history()

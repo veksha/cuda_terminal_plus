@@ -160,8 +160,8 @@ class Stream(object):
                     raise TypeError("{0} is missing {1}".format(screen, event))
 
         self.listener = screen
-        self._parser = self._parser_fsm()
-        self._taking_plain_text = next(self._parser)
+        self._parser = None
+        self._initialize_parser()
 
     def detach(self, screen):
         """Remove a given screen from the listener queue and fails
@@ -177,7 +177,7 @@ class Stream(object):
 
         :param str data: a blob of data to feed from.
         """
-        send = self._parser.send
+        send = self._send_to_parser
         draw = self.listener.draw
         match_text = self._text_pattern.match
         taking_plain_text = self._taking_plain_text
@@ -197,6 +197,19 @@ class Stream(object):
                 offset += 1
 
         self._taking_plain_text = taking_plain_text
+
+    def _send_to_parser(self, data):
+        try:
+            return self._parser.send(data)
+        except Exception:
+            # Reset the parser state to make sure it is usable even
+            # after receiving an exception. See PR #101 for details.
+            self._initialize_parser()
+            raise
+
+    def _initialize_parser(self):
+        self._parser = self._parser_fsm()
+        self._taking_plain_text = next(self._parser)
 
     def _parser_fsm(self):
         """An FSM implemented as a coroutine.
@@ -258,7 +271,7 @@ class Stream(object):
                 else:
                     if char == "#":
                         sharp_dispatch[(yield)]()
-                    if char == "%":
+                    elif char == "%":
                         self.select_other_charset((yield))
                     elif char in "()":
                         code = yield
@@ -314,6 +327,11 @@ class Stream(object):
                         break
                     elif char.isdigit():
                         current += char
+                    elif char == "$":
+                        # XTerm-specific ESC]...$[a-z] sequences are not
+                        # currently supported.
+                        yield
+                        break
                     else:
                         params.append(min(int(current or 0), 9999))
 
