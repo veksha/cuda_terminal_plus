@@ -22,7 +22,7 @@ from cudatext import *
 from .pyte import *
 
 fn_icon = os.path.join(os.path.dirname(__file__), 'terminal.png')
-fn_config = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal.ini')
+fn_config = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus.ini')
 fn_state = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus_state.json')
 
 fn_icon_normal = os.path.join(os.path.dirname(__file__), 'terminal_normal.png')
@@ -401,7 +401,7 @@ class TerminalBar:
             #'on_click': lambda *args,**vargs: ... # [(140617069637616, 2)], [{'data': (84, 10)}]
             
             # [(140617069637616, 2)], [{'data': {'btn': 1, 'state': '', 'x': 60, 'y': 9}}]
-            'on_menu': f'module=cuda_terminal;cmd=on_statusbar_menu;'
+            'on_menu': f'module=cuda_terminal_plus;cmd=on_statusbar_menu;'
             })
         h_sb = dlg_proc(self.h_dlg, DLG_CTL_HANDLE, index=n)
         print(f' 2 initting terminal bar')
@@ -425,7 +425,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
-        callback = f'module=cuda_terminal;cmd=on_statusbar_cell_click;info=new_term;'
+        callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_click;info=new_term;'
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
         # spacer
@@ -437,7 +437,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
-        callback = f'module=cuda_terminal;cmd=close_all_terms_dlg;'
+        callback = f'module=cuda_terminal_plus;cmd=close_all_terms_dlg;'
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
         self.sidebar_ic_inds = {}
@@ -463,7 +463,7 @@ class TerminalBar:
                 cellind = statusbar_proc(self.h_sb, STATUSBAR_ADD_CELL, index=add_ind, tag=termind)
                 
                 statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
-                callback = f'module=cuda_terminal;cmd=on_statusbar_cell_click;info={termind};'
+                callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_click;info={termind};'
                 statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
                 statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
             
