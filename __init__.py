@@ -682,7 +682,7 @@ class TerminalBar:
     def on_tab_reorder(self):
         self._sort_terms(self.terminals)
         self.refresh()
-        self._show_terminal(self.terminals.index(term))
+        self._show_terminal(self.terminals.index(self.active_term))
         
     def on_exit(self):
         for term in self.terminals:
