@@ -10,6 +10,8 @@ from subprocess import Popen, PIPE, STDOUT
 from threading import Thread, Lock
 from collections import namedtuple
 import json
+import colorsys
+import shlex
 
 if not IS_WIN:
     import pty # Pseudo terminal utilities
@@ -17,18 +19,22 @@ if not IS_WIN:
 
 import cudatext_keys as keys
 import cudatext_cmd as cmds
+from cudax_lib import html_color_to_int, int_to_html_color
 from cudatext import *
 
 from .pyte import *
 
 fn_icon = os.path.join(os.path.dirname(__file__), 'terminal.png')
 fn_config = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus.ini')
+fn_history = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus_history.txt')
 fn_state = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus_state.json')
 
-fn_icon_normal = os.path.join(os.path.dirname(__file__), 'terminal_normal.png')
-fn_icon_dim = os.path.join(os.path.dirname(__file__), 'terminal_dim.png')
 fn_icon_pluss = os.path.join(os.path.dirname(__file__), 'cuda_pluss.png')
 fn_icon_cross = os.path.join(os.path.dirname(__file__), 'cuda_cross.png')
+
+ICON_FOLDERS = [
+    os.path.join(os.path.dirname(__file__), 'terminalicons'),
+]
 
 MAX_BUFFER = 100*1000
 IS_UNIX_ROOT = not IS_WIN and os.geteuid()==0
@@ -43,28 +49,58 @@ MSG_ENDED = "\nConsole process was terminated.\n"
 READSIZE = 4*1024
 HOMEDIR = os.path.expanduser('~')
 INPUT_H = 26
-#stop_t = False # stop thread
+TERMBAR_H = 20
 
 ColorRange = namedtuple('ColorRange', 'start length fgcol bgcol isbold')
 DEFAULT_FGCOL = 'default' # 37
 DEFAULT_BGCOL = 'default' # 40
+MAX_TERM_NAME_LEN = 12
+SHELL_START_DIR = 'file' # file,project,user 
+HISTORY_GLOBAL_TAIL_LEN = 10 # when terminal local history is disabled - show this many from global
+ZEBRA_LIGHTNESS_DELTA = 8 # percent
+TERM_WRAP = 'char' # off,char,word,(int)
+
+SHELL_THEME_FG = '#2e3436,#cc0000,#4e9a06,#c4a000,#3465a4,#75507b,#06989a,#d3d7cf,#555753,#ef2929,#8ae234,#fce94f,#729fcf,#ad7fa8,#34e2e2,#eeeeec,#d3d7cf'
+SHELL_THEME_BG = '#2e3436,#cc0000,#4e9a06,#c4a000,#3465a4,#75507b,#06989a,#d3d7cf,#555753,#ef2929,#8ae234,#fce94f,#729fcf,#ad7fa8,#34e2e2,#eeeeec,#300a24'
+
 
 CMD_CLOSE_LAST_CUR_FILE = 101
-CMD_CLOSE_CURRENT = 102
-CMD_CUR_FILE_TERM_SWITCH = 103
-CMD_NEXT = 104
-CMD_PREVIOUS = 105
-CMD_EXEC_SEL = 106
+CMD_CLOSE = 102 # vargs: 'ind'=index of terminal to close; otherwise - close active terminal
+CMD_CUR_FILE_TERM_SWITCH = 104
+CMD_NEXT = 105
+CMD_PREVIOUS = 106
+CMD_EXEC_SEL = 107
+CMD_RENAME = 108 # vargs: 'ind'=index of terminal to rename; otherwise - close active terminal; 'newname'
+
+history = [] #TODO save,load,search
 
 #DONE tab reorder
+#DONE implement apply_theme()
+#DONE statusbar hint migrate to proper
+#DONE terminal history
+#DONE input/statusbar positioning
+#DONE self.memo width options
 
-#TODO self.memo width options
-#TODO implement apply_theme()
-#TODO hover statusbar migrate to proper
-#TODO terminal history
-#TODO input/statusbar positioning
+#TODO windows
+#TODO update readme
+#TODO check config validity on load?
 
+#TODO remove prints
+#TODO remove f-strings
 
+# search works very fast on million of 100char strings
+def add_to_history(toadd, maxlen): 
+    """ adds str or list of str to history"""
+    if type(toadd) == str:
+        if toadd in history:
+            history.remove(toadd)
+        history.append(toadd)
+    else: # batch add (initial load)
+        history.extend(toadd)
+    
+    if len(history) > maxlen*1.1:
+        del history[:maxlen]
+        
 def log(s):
     # Change conditional to True to log messages in a Debug process
     if False:
@@ -78,15 +114,16 @@ def bool_to_str(v):
 def str_to_bool(s):
     return s=='1'
 
-def pretty_path(s):
-    if not IS_WIN:
-        s = s.rstrip('\n')
-        if s==HOMEDIR:
-            s = '~'
-        elif s.startswith(HOMEDIR+'/'):
-            s = '~'+s[len(HOMEDIR):]
-    return s
-
+def activate_bottompanel(name):
+    print(f' [activating panel: <{name}>]')
+    app_proc(PROC_BOTTOMPANEL_ACTIVATE, name)
+    
+def hex_to_rgb(col):  
+    return (col&0xff)/0xff, ((col&0xff00)>>8)/0xff, ((col&0xff0000)>>16)/0xff
+    
+def rgb_to_hex(r,g,b):
+    return (round(b*255) << 16) + (round(g*0xff) << 8) + round(r*0xff)
+    
 
 class ControlTh(Thread):
     def __init__(self, Cmd):
@@ -114,7 +151,7 @@ class ControlTh(Thread):
                 try:
                     s = self.Cmd.ch_out.read(READSIZE)
                 except OSError:
-                    self.add_buf('', clear=True)
+                    self.add_buf(b'', clear=True)
                     # don't break, shell will be restarted
                 else: # no exception
                     if s != '':
@@ -142,36 +179,42 @@ class ControlTh(Thread):
 class Terminal:
     memo_count = 0
     
-    def __init__(self, h_dlg, filepath, shell, font_size, colmapfg, colmapbg, state=None):
+    def __init__(self, h_dlg, filepath, shell, font_size, max_history, colmapfg, colmapbg, state=None):
         self.h_dlg = h_dlg
         
         if state: # from state
-            self.name = state.get('name')
-            self.filepath = state.get('filepath')
-            self.cwd = state.get('cwd')
+            self.name = state.get('name', '')
+            self.filepath = os.path.expanduser(state.get('filepath', '')) 
+            self.cwd = os.path.expanduser(state.get('cwd', ''))
             self.lastactive = state.get('lastactive')
+            self.icon = state.get('icon', '')
+            self.wrap = state.get('wrap')
+            if max_history > 0:
+                self.history = state.get('history', [])[-max_history:]
+            else:
+                self.history = []
         else: # new
             if filepath:
+                filepath = os.path.expanduser(filepath)
                 self.filepath = filepath
                 self.name = os.path.split(filepath)[1]
-                self.cwd = os.path.split(filepath)[0]
+                self.cwd = self._get_file_start_dir(filepath)
             else:
                 self.filepath = ''
                 self.name = ''
-                self.cwd = ''
+                self.cwd = self._get_file_start_dir('')
+            self.icon = ''
             self.lastactive = time()
-        
-        #TODO implement
-        self.icon = 'TODO'
-        self.history = 'TODO'
+            self.history = []
+            self.wrap = None
         
         self.colmapfg = colmapfg
         self.colmapbg = colmapbg
         self.shell = shell
         self.font_size = font_size
+        self.max_history = max_history
         
         self._ansicache = {}
-        #self.p = ...
         
         self.stop_t = False # stop thread
         self.btext = b''
@@ -194,7 +237,7 @@ class Terminal:
             'a_t': ('', '['),
             'a_l': ('', '['),
             'a_r': ('', ']'),
-            'a_b': ('statusbar', '['),
+            'a_b': ('panels_parent', '['),
             'font_size': self.font_size,
             })
         self.memo = Editor(dlg_proc(self.h_dlg, DLG_CTL_HANDLE, index=n))
@@ -203,7 +246,6 @@ class Terminal:
         self.memo.set_prop(PROP_CARET_VIRTUAL, False)
         self.memo.set_prop(PROP_GUTTER_ALL, False)
         self.memo.set_prop(PROP_UNPRINTED_SHOW, False)
-        self.memo.set_prop(PROP_MARGIN, 2000)
         self.memo.set_prop(PROP_MARGIN_STRING, '')
         self.memo.set_prop(PROP_LAST_LINE_ON_TOP, False)
         self.memo.set_prop(PROP_HILITE_CUR_LINE, False)
@@ -214,9 +256,11 @@ class Terminal:
         self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextBg, self.colmapbg['default']))
         self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextFont, self.colmapfg['default']))
         
-    def _open_terminal(self, columns=80, lines=24):
-        #shell = self.shell_mac if IS_MAC else self.shell_unix
+        wrap = self.wrap or TERM_WRAP
+        self._apply_wrap(wrap)
+            
         
+    def _open_terminal(self, columns=80, lines=24):
         # child gets pid=0, fd=invalid;   
         # parent: pid=child's, fd=connected to child's terminal
         p_pid, master_fd = pty.fork()   
@@ -228,32 +272,43 @@ class Terminal:
             if self.cwd:
                 os.chdir(self.cwd)
                 
+            argv = shlex.split(self.shell)
             env = dict(TERM="xterm-color", LC_ALL="en_GB.UTF-8",
                         COLUMNS=str(columns), LINES=str(lines))
             if 'HOME' in os.environ:
                 env['HOME'] = os.environ['HOME']
             
-            os.execvpe(self.shell, [self.shell], env)
+            os.execvpe(argv[0], argv, env)
 
         # File-like object for I/O with the child process aka command.
         self.ch_out = os.fdopen(master_fd, "w+b", 0)
         self.ch_pid = p_pid
 
     def _open_process(self):
-        env = os.environ
-        if IS_MAC:
-            env['PATH'] += ':/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin'
-
         self.p = Popen(
-            os.path.expandvars(self.shell),
+            os.path.expandvars(self.shell), #TODO Windows: use shell arguments
             stdin = PIPE,
             stdout = PIPE,
             stderr = STDOUT,
             shell = IS_WIN,
             bufsize = 0,
-            env = env
+            env = os.environ
             )
         
+    def _apply_wrap(self, wrap):
+        if wrap == 'char':
+            self.memo.set_prop(PROP_WRAP, WRAP_ON_MARGIN)
+            self.memo.set_prop(PROP_MARGIN, 2000)
+        elif wrap == 'word':
+            self.memo.set_prop(PROP_WRAP, WRAP_ON_WINDOW)
+            self.memo.set_prop(PROP_MARGIN, 2000)
+        elif wrap == 'off':
+            self.memo.set_prop(PROP_WRAP, WRAP_OFF)
+            self.memo.set_prop(PROP_MARGIN, 2000)
+        elif type(wrap) == int:
+            self.memo.set_prop(PROP_WRAP, WRAP_ON_MARGIN)
+            self.memo.set_prop(PROP_MARGIN, wrap)
+            
     def show(self):
         if not self.memo:
             self._init_memo()
@@ -263,11 +318,11 @@ class Terminal:
             else:
                 self._open_terminal()
         
-            print(f' -- opened terminal: {self.name}')
+            log(f'* opened terminal: {self.name}')
 
             self.CtlTh = ControlTh(self)
             self.CtlTh.start()
-            print(f' -- started thread: {self.name}')
+            log(f' + started thread: {self.name}')
         
         self.lastactive = time()
         
@@ -282,21 +337,69 @@ class Terminal:
     def close(self):
         self.stop_t = True # stop thread
         if self.block.locked():     self.block.release()
-        if self.ch_pid >= 0:        os.kill(self.ch_pid, signal.SIGTERM)
+        if self.ch_pid >= 0:        
+            # SIGTERM doesnt kill bash if bash has something running => hangs on waitpid()
+            #   ... close properly is an unreliable pain
+            #os.kill(self.ch_pid, signal.SIGTERM)
+            os.kill(self.ch_pid, signal.SIGKILL)
+            os.waitpid(self.ch_pid, 0) # otherwise get a zombie;  0 - normal operation
         if self.ch_out:             self.ch_out.close()
         if self.p:                  
             self.p.terminate()
             self.p.wait()
             
+    def restart_shell(self):
+        log(f'* Restarting shell: {self.name}') 
+
+        self.close()
+        
+        # restarting (should preserve previous output...)
+        self.block.acquire()
+        self.stop_t = False
+        
+        if IS_WIN:
+            self._open_process()
+        else:
+            self._open_terminal()
+            
+        self.CtlTh = ControlTh(self)
+        self.CtlTh.start()
+        
+    def set_wrap(self, wrap):
+        self.wrap = wrap
+        wrap = self.wrap or TERM_WRAP
+        self._apply_wrap(wrap)
+        
+    def add_to_history(self, s):
+        if self.max_history > 0:
+            if s in self.history:
+                self.history.remove(s)
+            self.history.append(s)
+            
+            if len(self.history) > self.max_history:
+                del self.history[:-self.max_history]
+                
     def get_state(self):
+        #TODO check if ~ works on Win
+        if IS_WIN:
+            homepath = os.path.expandvars("$USERPROFILE")
+        else:
+            homepath = os.path.expandvars("$HOME")
+            
+        filepath = self.filepath.replace(homepath, '~', 1)  if self.filepath.startswith(homepath) else  self.filepath
+        cwd = self.cwd.replace(homepath, '~', 1) if self.cwd.startswith(homepath) else  self.cwd
+        
         state = {}
-        state['filepath'] = self.filepath
+        state['filepath'] = filepath
         state['name'] = self.name
-        state['cwd'] = self.cwd
+        state['cwd'] = cwd
         state['lastactive'] = self.lastactive
         
         state['icon'] = self.icon
-        state['history'] = self.history
+        state['history'] = self.history[-self.max_history:]  if self.max_history > 0 else  []
+
+        if self.wrap:
+            state['wrap'] = self.wrap        
         
         return state
         
@@ -306,55 +409,69 @@ class Terminal:
         Terminal.memo_count += 1
         return 'memo' + str(ind) 
         
+    def _get_file_start_dir(self, filepath):
+        if SHELL_START_DIR == 'project':
+            import cuda_project_man as p
+            if p.global_project_info:
+                mf = p.global_project_info.get('mainfile')
+                if mf:
+                    return os.path.dirname(mf)
             
-"""
-#TODO
-    on_show -> file -> terminal (path, name, icon, lastactive, history)
-        + Term(): .memo (Editor), .btext(-changed), .lock, .p, .history, .ansicache,
-    session?
-
-#Actions:
-    ? Open only terminals from currenly opened files, remove terminals older than a week
-    * Open Terminal -
-        * Current file hast terminal - open that
- 
-#Changes:
-    add Terminal (internal - refresh all)
-    close T  (internal - refresh all)
-    select T  (internal ...)
-    Select Editor-Tab  (EXTernal - refresh all)
-    Reorder Tabs  (ext - refresh all)
-"""
+        if SHELL_START_DIR == 'file' and filepath:
+            return os.path.dirname(filepath)  
+            
+        if SHELL_START_DIR == 'user' or not filepath:
+            return os.path.expanduser('~')
+        
+        return os.path.dirname(filepath)
+            
+        
+            
 class TerminalBar:
-    def __init__(self, h_dlg, plugin, state, font_size):
-        print(f' 0 initting terminal bar')
-
+    def __init__(self, h_dlg, plugin, shell_str, state, layout, max_history, font_size):
         self.Cmd = plugin
         self.h_dlg = h_dlg
+        self.shell_str = shell_str
         self.state = state # list of dicts
         self.font_size = font_size
+        self.max_history = max_history
+        
+        self.v_cell_range = (0.1, 1) # 0.1 - to preserve color for min values (not just give black)
+        # 'Lightness' shift (from HSV color); values are relative to active tab color from current theme
+        self.v_cell_norm = -0.15
+        self.v_cell_cur_file = 0
+        self.v_cell_active_term = +0.20
+
+        v_zebra = max(0, min(0.5, ZEBRA_LIGHTNESS_DELTA*0.01)) # clamp to 0.0-0.5
+        self.v_cell_norm_alt = self.v_cell_norm - v_zebra # -0.225 # for zebra
+        
+        self.start_extras = 1 # non-terminal cells at start
+        self.end_extras = 2 # at end
+        
+        self.h_iml, self.ic_inds = self._load_icons()
+        self.ic_inds_util = {
+            'no_icon':self.ic_inds.pop('White'),  # default|initial icon
+            'ic_pluss':self.ic_inds.pop('ic_pluss'), 
+            'ic_cross':self.ic_inds.pop('ic_cross'), 
+        }
         
         self.terminals = [] # list of Terminal()
         self.sidebar_names = []
         self.active_term = None # Terminal()
         self._init_terms(state)
         
-        self.h_sb, self.h_iml = self.open_init()
+        self.h_sb = self._open_init()
         
-        print(f' ~~~ initted termbar')
         self.refresh()
-        self._start_time = time() # ignore shot_term 0.5 sec after start (to not override active_term by initial panel)
-        
-        #callback = lambda tag: (self.refresh(),
-                                #app_proc(PROC_BOTTOMPANEL_REMOVE, 'Terminal'))
-        #timer_proc(TIMER_START_ONE, callback, interval=150)
-
+        # ignore show_term 0.5 sec after start (to not override active_term by initial panel)
+        self._start_time = time() 
+        self._apply_layout(layout)
         
     def _init_terms(self, state):
         if state:
             # which to activate: 
-            #   * last active for current tab
-            #   * not current tab => just last active
+            #   * last active for current Editor
+            #   * no file in current Editor => just last active
             
             currentfilepath = ed.get_filename()
             if currentfilepath:
@@ -368,9 +485,9 @@ class TerminalBar:
             
             for termstate in self.state:
                 # create terminal
-                shell = SHELL_UNIX #TODO fix temp
-                term = Terminal(self.h_dlg, filepath=None, shell=SHELL_UNIX, font_size=self.font_size, 
-                                    colmapfg=self.Cmd.colmapfg, colmapbg=self.Cmd.colmapbg, state=termstate)
+                term = Terminal(self.h_dlg, filepath=None, shell=self.shell_str, font_size=self.font_size, 
+                                    colmapfg=self.Cmd.colmapfg, colmapbg=self.Cmd.colmapbg, state=termstate,
+                                    max_history=self.max_history)
                 self.terminals.append(term)
                 
                 if termstate['lastactive'] == max_lastactive:
@@ -378,58 +495,37 @@ class TerminalBar:
                 
         else: # no state 
             # create no-file terminal
-            term = Terminal(self.h_dlg, filepath=None, shell=SHELL_UNIX, font_size=self.font_size, 
-                                colmapfg=self.Cmd.colmapfg, colmapbg=self.Cmd.colmapbg)
+            term = Terminal(self.h_dlg, filepath=None, shell=self.shell_str, font_size=self.font_size, 
+                        colmapfg=self.Cmd.colmapfg, colmapbg=self.Cmd.colmapbg, max_history=self.max_history)
             self.terminals.append(term)
             self.active_term = term
             
-        self._sort_terms(self.terminals)
+        TerminalBar._sort_terms(self.terminals)
         
-        
-    def open_init(self):
+    def _open_init(self):
         colors = app_proc(PROC_THEME_UI_DICT_GET,'')
         color_btn_back = colors['ButtonBgPassive']['color']
         color_tab_passive = colors['TabPassive']['color']
-        
-        print(f' 1 initting terminal bar')
+
         n = dlg_proc(self.h_dlg, DLG_CTL_ADD, 'statusbar')
         dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, index=n, prop={
             'name': 'statusbar',
-            #'a_t': None,
-            #'a_t': ('', '['),
-            'a_l': ('', '['),
-            'a_r': ('', ']'),
-            #'a_b': ('input', '['),
-            'sp_b': INPUT_H,
-            'h': 20,
+            'p': 'panels_parent',
+            'h': TERMBAR_H,
+            'align': self.Cmd._layout,
             'font_size': self.font_size,
             'color': color_btn_back,
-            
-            #'on_change': lambda *args,**vargs: print(f'  // statusbar: change: [{args}], [{vargs}]'), # no workee
-            #'on_click': lambda *args,**vargs: ... # [(140617069637616, 2)], [{'data': (84, 10)}]
-            
-            # [(140617069637616, 2)], [{'data': {'btn': 1, 'state': '', 'x': 60, 'y': 9}}]
             'on_menu': f'module=cuda_terminal_plus;cmd=on_statusbar_menu;'
             })
         h_sb = dlg_proc(self.h_dlg, DLG_CTL_HANDLE, index=n)
-        print(f' 2 initting terminal bar')
 
         ### Icons ###
-        h_iml = imagelist_proc(-1, IMAGELIST_CREATE, value=self.h_dlg)
-        statusbar_proc(h_sb, STATUSBAR_SET_IMAGELIST, value=h_iml)
+        statusbar_proc(h_sb, STATUSBAR_SET_IMAGELIST, value=self.h_iml)
         
-        imagelist_proc(h_iml, IMAGELIST_SET_SIZE, (20,20))
-        #self.sb_ics = {}
-        self.statusbar_ic_inds = {} # name to imagelist idnex
-        self.statusbar_ic_inds['ic_norm'] = imagelist_proc(h_iml, IMAGELIST_ADD, fn_icon_normal)
-        self.statusbar_ic_inds['ic_dim'] = imagelist_proc(h_iml, IMAGELIST_ADD, fn_icon_dim)
-        self.statusbar_ic_inds['ic_pluss'] = imagelist_proc(h_iml, IMAGELIST_ADD, fn_icon_pluss)
-        self.statusbar_ic_inds['ic_cross'] = imagelist_proc(h_iml, IMAGELIST_ADD, fn_icon_cross)
-
         ### Plus, Spacer, Close ###
         # pluss
         cellind = statusbar_proc(h_sb, STATUSBAR_ADD_CELL, index=-1)
-        statusbar_proc(h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=self.statusbar_ic_inds['ic_pluss'])
+        statusbar_proc(h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=self.ic_inds_util['ic_pluss'])
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
@@ -441,113 +537,57 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSTRETCH, index=cellind, value=True)
         # cross
         cellind = statusbar_proc(h_sb, STATUSBAR_ADD_CELL, index=-1)
-        statusbar_proc(h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=self.statusbar_ic_inds['ic_cross'])
+        statusbar_proc(h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=self.ic_inds_util['ic_cross'])
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
         callback = f'module=cuda_terminal_plus;cmd=close_all_terms_dlg;'
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
-        self.sidebar_ic_inds = {}
-        h_sbim = app_proc(PROC_SIDEPANEL_GET_IMAGELIST, '')
-        self.sidebar_ic_inds['ic_normal'] = imagelist_proc(h_sbim, IMAGELIST_ADD, value=fn_icon_normal)
-        self.sidebar_ic_inds['ic_dim'] = imagelist_proc(h_sbim, IMAGELIST_ADD, value=fn_icon_dim)
+        return h_sb
+    
+    def _load_icons(self):
+        h_iml = app_proc(PROC_SIDEPANEL_GET_IMAGELIST, '')
         
-        return h_sb, h_iml
+        res = {} # name -> image list index
+        exts = ('.png', '.bmp')
         
-    def refresh(self):
-        start_extras = 1 # non-terminal cells at start
-        end_extras = 2 # at end
+        res['ic_pluss'] = imagelist_proc(h_iml, IMAGELIST_ADD, fn_icon_pluss)
+        res['ic_cross'] = imagelist_proc(h_iml, IMAGELIST_ADD, fn_icon_cross)
         
-        needtermsn = len(self.terminals)
-        termsn = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT) - start_extras - end_extras
-        ####
-        
-        # proper number of cells
-        if needtermsn > termsn: # need more terminals
-            for i in range(needtermsn - termsn):
-                add_ind = start_extras + termsn + i
-                termind = add_ind - start_extras
-                cellind = statusbar_proc(self.h_sb, STATUSBAR_ADD_CELL, index=add_ind, tag=termind)
+        for folder in ICON_FOLDERS:
+            for filename in os.listdir(folder):
+                name, ext = os.path.splitext(filename)
                 
-                statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
-                callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_click;info={termind};'
-                statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
-                statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
-            
-        elif needtermsn < termsn: # need less terms
-            rem_ind = start_extras + needtermsn
-            for i in range(termsn - needtermsn):
-                statusbar_proc(self.h_sb, STATUSBAR_DELETE_CELL, index=rem_ind)
+                if ext.lower() in exts:
+                    iconname = name.capitalize()
+                    icon_path = os.path.join(folder, filename)
+                    res[iconname] = imagelist_proc(h_iml, IMAGELIST_ADD, icon_path)
+        return h_iml, res
                 
-        for termind in range(len(self.terminals)):
-            cellind = termind + start_extras
-            hint = 'Terminal+: ' + self.terminals[termind].filepath
-            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value=hint)
-        
-        #statusbar_proc(h_sb, STATUSBAR_SET_CELL_TEXT, index=2, value='dbg')
-        self._update_term_icons()
-        self._update_statusbar_cells_bg()
-
-    # [(140617069637616, 2, 2, 'ind2')], [{}]
-    def on_statusbar_cell_click(self, id_dlg, id_ctl, data='', info=''):
-        print(f' cell click:{id_dlg}, {id_ctl};; {data};; {info}')
-
-        if info == 'new_term':
-            self.new_term()
-        else:
-            clicked_ind = data
-            print(f'clicked: {clicked_ind}({type(clicked_ind)}')
-            self._show_terminal(clicked_ind)
-        
-    # data:{'btn': 1, 'state': '', 'x': 19, 'y': 6}
-    def on_statusbar_menu(self, id_dlg, id_ctl, data='', info=''):
-        #clicked_ind = data
-        #print(f'clicked: id_ctl:{id_ctl};  data:{data};  info:{info}')
-        click_x = data.get('x', 0)
-        x = 0
-        count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
-        for i in range(count):
-            w = statusbar_proc(self.h_sb, STATUSBAR_GET_CELL_SIZE, index=i)
-            if click_x <= (x + w):
-                h_menu = menu_proc(0, MENU_CREATE)
-                menu_proc(h_menu, MENU_ADD, command=2700, caption=f'Terminal {i-1} menu')
-                menu_proc(h_menu, MENU_ADD, command=2700, caption='Rename')
-                menu_proc(h_menu, MENU_ADD, command=2700, caption='Close')
-                menu_proc(h_menu, MENU_SHOW)
-                return
-            x += w
-            
-    # force - if active terminal changed
     def _update_term_icons(self):
-        start_extras = 1 # non-terminal cells at start
-        end_extras = 2 # at end
-
         # delete extra panels
         if len(self.terminals) < len(self.sidebar_names):
-            print(f' ==== removins sidebars: {len(self.sidebar_names)}: {self.sidebar_names}')
             todeln = len(self.sidebar_names) - len(self.terminals)
             for i in range(todeln):
                 if len(self.sidebar_names) == 1: # to not remove last sidebar icon
                     break
                 sidebar_name = self.sidebar_names.pop()
                 app_proc(PROC_BOTTOMPANEL_REMOVE, sidebar_name)
-            print(f'      new sidebar count: {len(self.sidebar_names)}: {self.sidebar_names}')
+            log(f'      new sidebar count: {len(self.sidebar_names)}: {self.sidebar_names}')
         
         taken_names = set()
                 
-        #active_term_sidebar_name = None
+        no_icon = self.ic_inds_util['no_icon']
         # update cell icons  and add sidebar icons
         for i,term in enumerate(self.terminals):
-            cellind = start_extras + i
+            cellind = self.start_extras + i
 
-            icon = self.statusbar_ic_inds['ic_norm']  if term == self.active_term else  self.statusbar_ic_inds['ic_dim']
+            icon = self.ic_inds.get(term.icon, no_icon)
             
-            print(f' giving iucon to:{cellind} :: {icon}')
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=icon)
             
             # sidebar
-            
             panelname = 'Terminal+' if i == 0 else 'Terminal+'+str(i)
             tooltip = 'Terminal: '+term.filepath
             ind = 2
@@ -556,39 +596,69 @@ class TerminalBar:
                 ind += 1
             taken_names.add(tooltip)
             
-            icon_path = fn_icon_normal if term == self.active_term else fn_icon_dim 
+            # add if need more sidebar tabs
             if i >= len(self.sidebar_names):
-                app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (panelname, self.h_dlg, icon_path))
+                if not self.Cmd.floating: # sidebar icons are useless when .floating=True
+                    app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (panelname, self.h_dlg, None))
                 self.sidebar_names.append(panelname)
                 
-            sidebar_icon = self.sidebar_ic_inds['ic_normal']  if term == self.active_term else self.sidebar_ic_inds['ic_dim']
-            app_proc(PROC_BOTTOMPANEL_SET_PROP, (panelname, sidebar_icon, tooltip))
+            app_proc(PROC_BOTTOMPANEL_SET_PROP, (panelname, icon, tooltip))
             
         if not self.terminals:
             app_proc(PROC_BOTTOMPANEL_SET_PROP, 
-                    (self.sidebar_names[0], self.sidebar_ic_inds['ic_normal'], 'Terminal+'))
-            
+                    (self.sidebar_names[0], self.ic_inds_util['no_icon'], 'Terminal+'))
             
     def _update_statusbar_cells_bg(self):
         if not hasattr(self, 'h_sb'):
-            print(f' !! NO h_sb on cells bg update')
+            log(f' !! NO h_sb on cells bg update')
             return
             
-        start_extras = 1 # non-terminal cells at start
-        end_extras = 2 # at end
-        
         colors = app_proc(PROC_THEME_UI_DICT_GET,'')
         color_tab_active = colors['TabActive']['color']
-        color_tab_hover = colors['TabOver']['color']
         
+        ### colors (HSV)
+        v_max = max(self.v_cell_norm, self.v_cell_norm_alt, self.v_cell_cur_file, self.v_cell_active_term)
+        v_min = min(self.v_cell_norm, self.v_cell_norm_alt, self.v_cell_cur_file, self.v_cell_active_term)
+        
+        rgb = hex_to_rgb(color_tab_active) # (0.1, 0.2, 1.0) # rgb for .colorsys
+        # calc
+        h,s,v = colorsys.rgb_to_hsv(*rgb)
+        
+        delta = 0
+        if v+v_max > self.v_cell_range[1]:
+            delta = self.v_cell_range[1] - (v+v_max)
+        elif v+v_min < self.v_cell_range[0]:
+            delta = self.v_cell_range[0] - (v+v_min)
+        
+        rgb_norm =              colorsys.hsv_to_rgb(h,s, v + self.v_cell_norm + delta)
+        rgb_norm_alt =          colorsys.hsv_to_rgb(h,s, v + self.v_cell_norm_alt + delta)
+        rgb_cur_file =          colorsys.hsv_to_rgb(h,s, v + self.v_cell_cur_file + delta)
+        rgb_cur_active_term =   colorsys.hsv_to_rgb(h,s, v + self.v_cell_active_term + delta)
+            
+        color_norm = rgb_to_hex(*rgb_norm)
+        color_norm_alt = rgb_to_hex(*rgb_norm_alt)
+        color_cur_file = rgb_to_hex(*rgb_cur_file)
+        color_cur_active_term = rgb_to_hex(*rgb_cur_active_term)
+            
         editor_filepath = ed.get_filename()
         
+        # for 'zebra'
+        term_file_ind = {} 
+        for term in self.terminals:
+            if term.filepath not in term_file_ind:
+                term_file_ind[term.filepath] = len(term_file_ind)
+        
         for i,term in enumerate(self.terminals):
-            cellind = i + start_extras
-            is_for_cur_editor = term.filepath == editor_filepath
-            col = color_tab_hover  if is_for_cur_editor else  color_tab_active
-            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=col)
+            cellind = i + self.start_extras
             
+            if self.active_term == term: # active term
+                col = color_cur_active_term
+            elif term.filepath == editor_filepath: # current file
+                col = color_cur_file
+            else: # norm
+                is_even = (term_file_ind[term.filepath]%2) == 0
+                col = color_norm  if is_even else  color_norm_alt # zebra
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=col)
             
     def _show_terminal(self, ind):
         self.Cmd.memo = None
@@ -603,45 +673,165 @@ class TerminalBar:
             self.Cmd.memo = self.active_term.memo
             
             self._update_term_icons()
+            self._update_statusbar_cells_bg()
+            self.Cmd.upd_history_combo()
 
+    def _apply_layout(self, layout):
+        count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
+        spacer_ind = count-2 
+        
+        if layout == ALIGN_TOP: # vertical
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_AUTOSTRETCH, index=spacer_ind, value=True)
+        else: # horizontal
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_AUTOSTRETCH, index=spacer_ind, value=False)
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_SIZE, index=spacer_ind, value=0)
+              
+    def _sort_terms(l):
+        # sort: no-file terms | terms with editor tabs | terms without editor tabs
+        fileinds = {}
+        for i,h in enumerate(ed_handles()):
+            filepath = Editor(h).get_filename()
+            fileinds[filepath] = i
+        
+        l.sort(key=lambda term: fileinds.get(term.filepath, (-1  if not term.filepath else 1000)))  
     
-    # result of mouse click
-    # ques action for later        
+    def refresh(self):
+        needtermsn = len(self.terminals)
+        termsn = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT) - self.start_extras - self.end_extras
+        
+        # proper number of cells
+        if needtermsn > termsn: # need more terminals
+            for i in range(needtermsn - termsn):
+                add_ind = self.start_extras + termsn + i
+                termind = add_ind - self.start_extras
+                cellind = statusbar_proc(self.h_sb, STATUSBAR_ADD_CELL, index=add_ind, tag=termind)
+                
+                statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
+                callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_click;info={termind};'
+                statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
+                statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
+            
+        elif needtermsn < termsn: # need less terms
+            rem_ind = self.start_extras + needtermsn
+            for i in range(termsn - needtermsn):
+                statusbar_proc(self.h_sb, STATUSBAR_DELETE_CELL, index=rem_ind)
+                
+        for i,term in enumerate(self.terminals):
+            cellind = i + self.start_extras
+            
+            if len(term.name) <= MAX_TERM_NAME_LEN:
+                text = term.name
+            else:
+                text = term.name[:MAX_TERM_NAME_LEN-1] + '..'
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_TEXT, index=cellind, value=text)
+            
+            hint = 'Terminal+: ' + term.filepath
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value=hint)
+        
+        self._update_term_icons()
+        self._update_statusbar_cells_bg()
+        self.Cmd._queue_layout_controls()
+        self.Cmd.upd_history_combo()
+        
+
+    # [(140617069637616, 2, 2, 'ind2')], [{}]
+    def on_statusbar_cell_click(self, id_dlg, id_ctl, data='', info=''):
+        log(f' cell click:{id_dlg}, {id_ctl};; {data};; {info}')
+
+        if info == 'new_term':
+            filepath = ed.get_filename()
+            self.new_term(filepath=filepath)
+        else:
+            clicked_ind = data
+            self._show_terminal(clicked_ind)
+        
+    # data:{'btn': 1, 'state': '', 'x': 19, 'y': 6}
+    def on_statusbar_menu(self, id_dlg, id_ctl, data='', info=''):
+        p = dlg_proc(self.h_dlg, DLG_CTL_PROP_GET, name='statusbar')
+        termind = p["tab_hovered"] - self.start_extras
+        if termind < 0  or termind >= len(self.terminals):
+            return
+        
+        term = self.terminals[termind]
+        
+        cb_fs = 'module=cuda_terminal_plus;cmd={0};info={1};'
+        
+        # rename
+        h_menu = menu_proc(0, MENU_CREATE)
+        callback = cb_fs.format('on_statusbar_cell_rename', termind)
+        menu_proc(h_menu, MENU_ADD, command=callback, caption='Rename')
+        
+        # icon change
+        ic_id = menu_proc(h_menu, MENU_ADD, caption='Change icon')
+        for icname in list(sorted(self.ic_inds)):
+            callback = cb_fs.format('on_set_term_icon', str(termind) + chr(1) + icname)
+            menu_proc(ic_id, MENU_ADD, command=callback, caption=icname)
+
+        # Terminal Wrap
+        wrap_id = menu_proc(h_menu, MENU_ADD, caption='Terminal wrap')
+        
+        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'off')
+        wrap_none_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='No wrap')
+        
+        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'char')
+        wrap_char_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='By character')
+        
+        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'word')
+        wrap_word_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='By word')
+        
+        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'custom')
+        wrap_custom_caption = 'Custom: '+str(term.wrap)  if type(term.wrap) == int else  'Custom'
+        wrap_custom_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption=wrap_custom_caption)
+        
+        menu_proc(wrap_id, MENU_ADD, caption='-') # separator
+        
+        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1))
+        menu_proc(wrap_id, MENU_ADD, command=callback, caption='Reset')
+
+        if term.wrap:
+            if term.wrap == 'char':
+                checked_id = wrap_char_id
+            elif term.wrap == 'word':
+                checked_id = wrap_word_id
+            elif term.wrap == 'off':
+                checked_id = wrap_none_id
+            else:
+                checked_id = wrap_custom_id
+            menu_proc(checked_id, MENU_SET_CHECKED, command=True)
+            
+
+        # close
+        menu_proc(h_menu, MENU_ADD, caption='-') # separator
+        callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_close;info={termind};'
+        menu_proc(h_menu, MENU_ADD, command=callback, caption='Close')
+        
+        menu_proc(h_menu, MENU_SHOW)
+
     def show_terminal(self, ind=None, name=None):
         if not self.terminals:
-            print(f'termbar: show_terminal: NO TERMINALS')
+            log(f'termbar: show_terminal: NO TERMINALS')
             return
         if time() - self._start_time < 0.5:
-            print(f' sklipping shot_term: too soon')
+            log(f' ! sklipping show_term: too soon') #TODO check if still needed
 
             if self.terminals and self.active_term:
                 self._show_terminal(self.terminals.index(self.active_term))
             return
         
-        print(f' -- Show Term:{ind}, [{name}]')
-        #if name == 'Terminal+': # first click
-            #ind = self.terminals.index(self.active_term)
-        #elif ind == None:
-            #ind = self.sidebar_names.index(name)
         if ind == None:
             ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
-        print(f'   => Show Term:{ind}, {name}')
+        log(f'   => Show Term:{ind}, {name}')
         
         self._show_terminal(ind)
         
     def remove_term(self, term, show_next=False):
-        print('rt 0')
-
         term.close()
-        print('rt 1')
+        
         if term.memo:
             dlg_proc(self.h_dlg, DLG_CTL_DELETE, name=term.memo_wgt_name)
-        print('rt 2')
             
         if term in self.terminals:
             if show_next:
-                print(f' showing next')
-
                 curterms = [t for t in self.terminals  if t.filepath == term.filepath]
                 if len(curterms) > 1:
                     choiceterms = curterms
@@ -650,19 +840,16 @@ class TerminalBar:
                     
                 ind = choiceterms.index(term)
                 termsn = len(choiceterms)
-                print(f' choice termsn:{termsn}')
 
                 if termsn > 1:
                     nextind = ind - 1  if (ind == termsn - 1) else  ind + 1
                     ind = self.terminals.index(choiceterms[nextind])
-                    self.show_terminal(ind=self.terminals.index(choiceterms[nextind]))
+                    self._show_terminal(ind=self.terminals.index(choiceterms[nextind]))
                 
             self.terminals.remove(term)
-        else:
-            print('!!! termo not ion terms')
-
             
-        print('rt 3')
+            self.Cmd._queue_layout_controls()
+            
         if self.active_term == term:
             self.active_term = None
         
@@ -670,28 +857,25 @@ class TerminalBar:
         for term in [*self.terminals]:
             self.remove_term(term)
         self.refresh()
-        app_proc(PROC_BOTTOMPANEL_ACTIVATE, self.sidebar_names[0])
+        activate_bottompanel(self.sidebar_names[0])
             
             
-    def new_term(self):
-        print(f' new term: curent file:{ed.get_filename()}')
+    def new_term(self, filepath):
+        log(f'* new term for: [{filepath}]')
 
-        curfilepath = ed.get_filename()
-        term = Terminal(self.h_dlg, filepath=curfilepath, shell=SHELL_UNIX, font_size=self.font_size, 
-                            colmapfg=self.Cmd.colmapfg, colmapbg=self.Cmd.colmapbg)
+        term = Terminal(self.h_dlg, filepath=filepath, shell=self.shell_str, font_size=self.font_size, 
+                            colmapfg=self.Cmd.colmapfg, colmapbg=self.Cmd.colmapbg, max_history=self.max_history)
         self.terminals.append(term)
-        self._sort_terms(self.terminals)
+        TerminalBar._sort_terms(self.terminals)
         self.refresh()
         self._show_terminal(self.terminals.index(term))
+    
+    def set_term_icon(self, ind, icname):
+        self.terminals[ind].icon = icname
+        self._update_term_icons()
         
-    def _sort_terms(self, l):
-        # sort no-file terms | terms with editor tabs | terms without editor tabs
-        fileinds = {}
-        for i,h in enumerate(ed_handles()):
-            filepath = Editor(h).get_filename()
-            fileinds[filepath] = i
-        
-        l.sort(key=lambda term: fileinds.get(term.filepath, (-1  if not term.filepath else 1000)))
+    def set_term_wrap(self, ind, wrap):
+        self.terminals[ind].set_wrap(wrap)
         
     def timer_update(self):
         if not self.active_term:
@@ -715,45 +899,86 @@ class TerminalBar:
         return l
 
     def on_tab_reorder(self):
-        self._sort_terms(self.terminals)
-        self.refresh()
-        self._show_terminal(self.terminals.index(self.active_term))
+        if self.terminals:
+            TerminalBar._sort_terms(self.terminals)
+            self.refresh()
+            self._show_terminal(self.terminals.index(self.active_term))
+    
+    def get_children_w(self):
+        count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
+        full_w = 0
+        for i in range(count):
+            full_w += statusbar_proc(self.h_sb, STATUSBAR_GET_CELL_SIZE, i)
+        return full_w
         
     def on_exit(self):
         for term in self.terminals:
             term.close()
             
-    def run_cmd(self, cmd):
+    def run_cmd(self, cmd, **vargs):
+        log(f'* [cmd:{cmd} ({vargs})]')
+
         if cmd == CMD_CLOSE_LAST_CUR_FILE:
             curfilepath = ed.get_filename()
             if not curfilepath: return
             
             for term in reversed(self.terminals):
                 if term.filepath == curfilepath:
-                    print(f' cmd remove last: found: removing')
-
                     self.remove_term(term, show_next=True)
                     self.refresh()
                     self._update_term_icons()
                     self._update_statusbar_cells_bg()
-                    if self.active_term  and self.active_term in self.terminals: #TODO use find() or index()?
+                    if self.active_term  and self.active_term in self.terminals: 
                         ind = self.terminals.index(self.active_term)
-                        app_proc(PROC_BOTTOMPANEL_ACTIVATE, self.sidebar_names[ind])
+                        activate_bottompanel(self.sidebar_names[ind])
                     break
             
-        elif cmd == CMD_CLOSE_CURRENT:
-            if self.active_term:
-                self.remove_term(self.active_term, show_next=True)
+        elif cmd == CMD_CLOSE:
+            if 'ind' in vargs: # context menu
+                term = self.terminals[vargs['ind']]
+            elif self.active_term:
+                term = self.active_term
+                
+            if term:
+                self.remove_term(term, show_next=True)
                 self.refresh()
                 self._update_term_icons()
                 self._update_statusbar_cells_bg()
                 if self.active_term  and self.active_term in self.terminals:
                     ind = self.terminals.index(self.active_term)
-                    app_proc(PROC_BOTTOMPANEL_ACTIVATE, self.sidebar_names[ind])
-                
+                    activate_bottompanel(self.sidebar_names[ind])
+                    
         elif cmd == CMD_CUR_FILE_TERM_SWITCH:
-            '!!! CONTINUE'
-            pass
+            is_ed_focused = ed.get_prop(PROP_FOCUSED)
+            
+            p = dlg_proc(self.Cmd.h_dlg, DLG_PROP_GET)
+            is_term_focused = p['focused'] >= 0
+            
+            if is_ed_focused:  # focus editor-file's last used terminal if any
+                if self.terminals:
+                    filepath = ed.get_filename()
+                    if filepath:
+                        term_times = {term.lastactive:ind for ind,term in enumerate(self.terminals) 
+                                            if term.filepath == filepath}
+                        if term_times:
+                            last_file_term_ind = term_times[max(term_times)]
+                            self.show_terminal(ind=last_file_term_ind)
+                            activate_bottompanel(self.sidebar_names[last_file_term_ind])
+                            
+                            self.Cmd.input.focus()
+                            
+                        else:
+                            log('Document has no teminals: '+filepath)
+                            
+            elif is_term_focused: # focus terminal's editor if any
+                if self.active_term and self.active_term.filepath:
+                    for h in ed_handles():
+                        e = Editor(h)
+                        if e.get_filename() == self.active_term.filepath:
+                            e.focus()
+                            break
+            else: # focused not editor or term: focus editor
+                ed.focus()
             
         elif cmd == CMD_NEXT:
             if self.active_term and self.terminals and self.active_term in self.terminals: 
@@ -768,424 +993,47 @@ class TerminalBar:
         elif cmd == CMD_EXEC_SEL:
             if self.active_term and len(ed.get_carets()) == 1:
                 txt = ed.get_text_sel()
-                if '\n' not in txt:
-                    self.Cmd.run_cmd(txt)
+                if txt:
+                    if '\n' not in txt:
+                        self.Cmd.run_cmd(txt)
+                else:
+                    caret = ed.get_carets()
+                    caret_x,caret_y = caret[0:2]
+                    txt = ed.get_text_line(caret_y).rstrip('\n')
+                    if txt:
+                        self.Cmd.run_cmd(txt)
+                    ed.set_caret(caret_x, caret_y+1)
+                    
+        elif cmd == CMD_RENAME:
+            termind = vargs.get('ind', -1) # -1 - current
             
+            if termind >= 0: # context menu
+                term = self.terminals[termind]
+            elif self.active_term: # comamnd (menu, ...)
+                term = self.active_term
+                
+            if term:
+                newname = dlg_input('Rename Terminal', term.name)
+                if newname != None:
+                    term.name = newname
+                    self.refresh()
+                    self._update_term_icons()
+                    self._update_statusbar_cells_bg()
+                    
+    def _dbg_set_cells_col(self, col):
+        count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
+        for i in range(count):
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=i, value=col)    
+            
+    """ # scroll hidden terms, later
+    _hidden = 0 
+    def _dbg_toggle_term_hide(self, hide):
+        count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
+        count -= self.start_extras + self.end_extras
+        if hide:
+            tohide = self._hidden"""
 
 class Command:
-    
-    def __init__(self):
-        self.title = 'Terminal+'
-        self.title_float = 'CudaText Terminal'
-        self.hint_float = 'Terminal opened in floating window'
-        self.h_dlg = None
-    
-        #terminal_w = 80
-        self.terminal_w = 2048 # - unlimited?
-        self.termbar = None
-        
-        if IS_WIN:
-            global ENC
-            ENC = ini_read(fn_config, 'op', 'encoding_windows', ENC)
-
-        global MAX_BUFFER
-        try:
-            MAX_BUFFER = int(ini_read(fn_config, 'op', 'max_buffer_size', str(MAX_BUFFER)))
-        except:
-            pass
-
-        self.shell_unix = ini_read(fn_config, 'op', 'shell_unix', SHELL_UNIX)
-        self.shell_mac = ini_read(fn_config, 'op', 'shell_macos', SHELL_MAC)
-        self.shell_win = ini_read(fn_config, 'op', 'shell_windows', SHELL_WIN)
-        self.add_prompt = str_to_bool(ini_read(fn_config, 'op', 'add_prompt_unix', '1'))
-        self.dark_colors = str_to_bool(ini_read(fn_config, 'op', 'dark_colors', '1'))
-        self.floating = str_to_bool(ini_read(fn_config, 'op', 'floating_window', '0'))
-        self.floating_topmost = str_to_bool(ini_read(fn_config, 'op', 'floating_window_topmost', '0'))
-
-        try:
-            self.font_size = int(ini_read(fn_config, 'op', 'font_size', '9'))
-        except:
-            pass
-
-        try:
-            self.max_history = int(ini_read(fn_config, 'op', 'max_history', '10'))
-        except:
-            pass
-
-        self.load_history()
-        self.h_menu = menu_proc(0, MENU_CREATE)
-
-        #for-loop don't work here
-        self.menu_calls = []
-        self.menu_calls += [ lambda: self.run_cmd_n(0) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(1) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(2) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(3) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(4) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(5) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(6) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(7) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(8) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(9) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(10) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(11) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(12) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(13) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(14) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(15) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(16) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(17) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(18) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(19) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(20) ]
-        self.menu_calls += [ lambda: self.run_cmd_n(21) ]
-
-
-    def open_init(self):
-
-        self.h_dlg = self.init_form()
-
-        if self.floating:
-            self.load_pos()
-            dlg_proc(self.h_dlg, DLG_PROP_SET, prop={
-                'border': DBORDER_SIZE,
-                'cap': self.title_float,
-                'x': self.wnd_x,
-                'y': self.wnd_y,
-                'w': self.wnd_w,
-                'h': self.wnd_h,
-                'topmost': self.floating_topmost,
-            })
-            dlg_proc(self.h_dlg, DLG_SHOW_NONMODAL)
-            h_embed = dlg_proc(0, DLG_CREATE)
-            n = dlg_proc(h_embed, DLG_CTL_ADD, prop='panel')
-            dlg_proc(h_embed, DLG_CTL_PROP_SET, index=n, prop={
-                'color': 0xababab,
-                'cap': self.hint_float,
-                'align': ALIGN_CLIENT,
-            })
-        else:
-            h_embed = self.h_dlg
-
-        app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (self.title, h_embed, fn_icon))
-
-        #self.p = None
-        #self.block = Lock() # locked by main mainly,  temporarily unlocked to let thread update .btext
-        #return
-        
-        """self.block.acquire()
-        self.btext = b''
-
-        if IS_WIN:
-            self.open_process()
-            self.p.stdin.flush()
-        else:
-            # ch_pid - chilc process pid
-            # ch_out - File-like object for I/O with the child process aka command.
-            self.ch_pid, self.ch_out = self.open_terminal()
-        
-        self.CtlTh = ControlTh(self)
-        self.CtlTh.start()"""
-
-        timer_proc(TIMER_START, self.timer_update, 200, tag='')
-
-    def init_form(self):
-
-        colors = app_proc(PROC_THEME_UI_DICT_GET,'')
-        color_btn_back = colors['ButtonBgPassive']['color']
-        color_btn_font = colors['ButtonFont']['color']
-        #color_tab_active = colors['TabActive']['color']
-        color_tab_passive = colors['TabPassive']['color']
-        #color_tab_hover = colors['TabOver']['color']
-
-        cur_font_size = self.font_size
-
-        h = dlg_proc(0, DLG_CREATE)
-        dlg_proc(h, DLG_PROP_SET, prop={
-            'border': False,
-            'keypreview': True,
-            'on_key_down': self.form_key_down,
-            'on_show': self.form_show,
-            'on_hide': self.form_hide,
-            'color': color_btn_back,
-            })
-
-        n = dlg_proc(h, DLG_CTL_ADD, 'button_ex')
-        dlg_proc(h, DLG_CTL_PROP_SET, index=n, prop={
-            'name': 'break',
-            'a_l': None,
-            'a_t': None,
-            'a_r': ('', ']'),
-            'a_b': ('', ']'),
-            'w': 90,
-            'h': INPUT_H,
-            'cap': 'Break',
-            'hint': 'Hotkey: Break',
-            'on_change': self.button_break_click,
-            })
-
-        n = dlg_proc(h, DLG_CTL_ADD, 'editor_combo')
-        dlg_proc(h, DLG_CTL_PROP_SET, index=n, prop={
-            'name': 'input',
-            'border': True,
-            'h': INPUT_H,
-            'a_l': ('', '['),
-            'a_r': ('break', '['),
-            'a_t': ('break', '-'),
-            'font_size': cur_font_size,
-            'texthint': 'Enter command here',
-            })
-        self.input = Editor(dlg_proc(h, DLG_CTL_HANDLE, index=n))
-
-        self.input.set_prop(PROP_ONE_LINE, True)
-        self.input.set_prop(PROP_GUTTER_ALL, True)
-        self.input.set_prop(PROP_GUTTER_NUM, False)
-        self.input.set_prop(PROP_GUTTER_FOLD, False)
-        self.input.set_prop(PROP_GUTTER_BM, False)
-        self.input.set_prop(PROP_GUTTER_STATES, False)
-        self.input.set_prop(PROP_UNPRINTED_SHOW, False)
-        self.input.set_prop(PROP_MARGIN, 2000)
-        self.input.set_prop(PROP_MARGIN_STRING, '')
-        self.input.set_prop(PROP_HILITE_CUR_LINE, False)
-        self.input.set_prop(PROP_HILITE_CUR_COL, False)
-
-        self.upd_history_combo()
-        
-        termsstate = self._load_state()
-        self.termbar = TerminalBar(h, plugin=self, state=termsstate, font_size=self.font_size)
-
-        dlg_proc(h, DLG_SCALE)
-        return h
-        
-        
-    def open(self):
-        print(f'CMD:open(')
-
-
-        #dont init form twice!
-        if not self.h_dlg:
-            self.open_init()
-
-        dlg_proc(self.h_dlg, DLG_CTL_FOCUS, name='input')
-
-        if self.floating:
-            # form can be hidden before, show
-            dlg_proc(self.h_dlg, DLG_SHOW_NONMODAL)
-            # via timer, to support clicking sidebar button
-            timer_proc(TIMER_START, self.dofocus, 300, tag='')
-        # WTF - Fatal Python error: Cannot recover from stack overflow.
-        else:
-            app_proc(PROC_BOTTOMPANEL_ACTIVATE, (self.title, True)) #True - set focus
-
-
-    def exec(self, s):
-        term = self.termbar.get_active_term()
-        
-        if IS_WIN:
-            if term.p and s:
-                term.p.stdin.write((s+'\n').encode(ENC))
-                term.p.stdin.flush()
-        else:
-            if term.ch_out and s:
-                term.ch_out.write((s+'\n').encode(ENC))
-
-
-    def config(self):
-
-        ini_write(fn_config, 'op', 'shell_windows', self.shell_win)
-        ini_write(fn_config, 'op', 'shell_unix', self.shell_unix)
-        ini_write(fn_config, 'op', 'shell_macos', self.shell_mac)
-        ini_write(fn_config, 'op', 'add_prompt_unix', bool_to_str(self.add_prompt))
-        ini_write(fn_config, 'op', 'dark_colors', bool_to_str(self.dark_colors))
-        ini_write(fn_config, 'op', 'floating_window', bool_to_str(self.floating))
-        ini_write(fn_config, 'op', 'floating_window_topmost', bool_to_str(self.floating_topmost))
-        ini_write(fn_config, 'op', 'max_history', str(self.max_history))
-        ini_write(fn_config, 'op', 'font_size', str(self.font_size))
-        ini_write(fn_config, 'op', 'max_buffer_size', str(MAX_BUFFER))
-        if IS_WIN:
-            ini_write(fn_config, 'op', 'encoding_windows', ENC)
-
-        file_open(fn_config)
-
-
-    def _load_state(self):
-        if os.path.exists(fn_state):
-            with open(fn_state, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
-        
-    def _save_state(self):
-        state = self.termbar.get_state()
-        
-        with open(fn_state, 'w', encoding='utf-8') as f:
-            json.dump(state, f, indent=2)
-
-
-    def timer_update(self, tag='', info=''):
-        changed = self.termbar.timer_update()
-        
-        # log("Entering in timer_update")
-        if changed:
-            #self.update_output(self.btext.decode(ENC))
-            self.update_output()
-
-    def show_history(self):
-
-        menu_proc(self.h_menu, MENU_CLEAR)
-        for (index, item) in enumerate(self.history):
-            menu_proc(self.h_menu, MENU_ADD,
-                index=0,
-                caption=item,
-                command=self.menu_calls[index],
-                )
-
-        prop = dlg_proc(self.h_dlg, DLG_CTL_PROP_GET, name='input')
-        x, y = prop['x'], prop['y']
-        x, y = dlg_proc(self.h_dlg, DLG_COORD_LOCAL_TO_SCREEN, index=x, index2=y)
-        menu_proc(self.h_menu, MENU_SHOW, command=(x, y))
-
-
-    #def is_sudo_input(self):
-
-    def run_cmd(self, text):
-
-        text = text.lstrip(' ')
-
-        if text==BASH_CLEAR:
-            self.btext = b''
-            #self.memo.set_prop(PROP_RO, False)
-            #self.memo.set_text_all('')
-            #self.memo.set_prop(PROP_RO, True)
-            #return
-
-        while len(self.history) >= self.max_history:
-            del self.history[0]
-
-        try:
-            n = self.history.index(text)
-            del self.history[n]
-        except:
-            pass
-
-        self.history += [text]
-        self.upd_history_combo()
-        self.input.set_text_all('')
-
-        sudo = not IS_WIN and text.startswith('sudo ')
-        if sudo:
-            text = 'sudo --stdin '+text[5:]
-
-        self.exec(text)
-
-        #sleep(0.05)
-
-
-    def run_cmd_n(self, n):
-
-        if n<len(self.history):
-            s = self.history[n]
-            self.input.set_text_all(s)
-            self.input.set_caret(len(s), 0)
-
-
-    # called on timer, if .btext changed
-    def update_output(self):
-        full_text, range_lists = self.parse_ansi_lines()
-        
-        self.memo.set_prop(PROP_RO, False)
-        self.memo.set_text_all(full_text)
-        self.apply_colors(range_lists)
-        self.memo.set_prop(PROP_RO, True)
-
-        self.memo.cmd(cmds.cCommand_GotoTextEnd)
-        self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-3)
-
-    def apply_colors(self, range_lists):
-        # range_lists - map: (fg,bg,isbold) -> (xs,ys,lens)
-        for (fg,bg,isbold),(xs,ys,lens) in range_lists.items():
-            fgcol = self.colmapfg.get(fg, self.broke_col)
-            bgcol = self.colmapbg.get(bg, self.broke_col)
-            font_bold = 1 if isbold else 0
-            
-            self.memo.attr(MARKERS_ADD_MANY, x=xs, y=ys, len=lens,
-                        color_font=fgcol, color_bg=bgcol, font_bold=font_bold)
-
-    
-    # cache - save parsed lines
-    _ansicache = {} # byte line -> [(plain_str, color_ranges), ...]  # splitted by terminal width
-    '!!! clear cache'
-    def parse_ansi_lines(self):
-        """ parses terminal output bytes line-by-line, caching parsing-results per line
-        """
-        term = self.termbar.get_active_term()
-        blines = term.btext.split(b'\n')
-        
-        res = []          
-        for bline in blines:
-            if bline in term._ansicache:
-                collines_l = term._ansicache[bline]
-                res.extend(collines_l)
-            else:
-                if not bline: #TODO do better
-                    continue
-                    
-                line = bline.decode(ENC)
-                
-                terminal = AnsiParser(columns=len(line), lines=1, p_in=None)
-                terminal.screen.dirty.clear()
-                terminal.feed(bline)
-                tiles = terminal.get_line_tiles() # (data, fg, bg, bold, reverse) 
-                
-                collines_l = []
-                nlines = (len(tiles)-1) // self.terminal_w + 1
-                for i in range(nlines):
-                    line_tiles = tiles[i*self.terminal_w : (i+1)*self.terminal_w]
-                  
-                    plain_str = ''.join((tile[0] for tile in line_tiles)).rstrip()
-                    color_ranges = self._get_color_ranges(line_tiles)
-                
-                    colored_line = (plain_str, color_ranges)
-                    res.append(colored_line)
-                    collines_l.append(colored_line)
-                    
-                term._ansicache[bline] = collines_l 
-        
-        full_text = '\n'.join((item[0] for item in res))
-        
-        # for MARKERS_ADD_MANY
-        range_lists = {} # (fg,bg,isbold) -> (xs,ys,lens)
-        for i,(s,crs) in enumerate(res):
-            for cr in crs:
-                key = (cr.fgcol, cr.bgcol, cr.isbold)
-                xs,ys,lens = range_lists.setdefault(key, ([],[],[])) 
-                xs.append(cr.start)
-                ys.append(i)
-                lens.append(cr.length)
-        
-        return full_text, range_lists
-        
-        
-    def _get_color_ranges(self, tiles):
-        range_start = -1
-        fg = DEFAULT_FGCOL
-        bg = DEFAULT_BGCOL
-        isbold = False
-        l = []
-        for i,(ch, tfg, tbg, tbold, treverse) in enumerate(tiles):
-            if fg != tfg  or bg != tbg  or tbold != isbold: # new color range
-                # finish previous color range
-                if fg != DEFAULT_FGCOL  or bg != DEFAULT_BGCOL  or isbold: # wasnt plain text-range
-                    l.append(ColorRange(start=range_start, length=i-range_start, fgcol=fg, bgcol=bg, isbold=isbold))
-                range_start = i
-                fg = tfg
-                bg = tbg
-                isbold = tbold
-        # add last range  if any
-        if fg != DEFAULT_FGCOL  or bg != DEFAULT_BGCOL  or isbold:
-            l.append(ColorRange(start=range_start, length=len(tiles)-range_start, fgcol=fg, bgcol=bg, isbold=isbold))
-        return l    
-        
-    tag = 123456
     broke_col = 0xff007f # pink
     
     colmapfg = { # xterm... https://en.wikipedia.org/wiki/ANSI_escape_code#Colors
@@ -1224,15 +1072,247 @@ class Command:
         'brightgreen': 0x34e28a,
         'brightbrown': 0x4fe9fc,
         'brightblue': 0xcf9f72,
-        'bfightmagenta': 0xa87fad,
+        'brightmagenta': 0xa87fad,
         'brightcyan': 0xe2e234,
         'brightwhite': 0xeceeee,
         
         'default': 0x240a30, # purple from ubuntu theme
     }
+    
+    def __init__(self):
+        self.title = 'Terminal+'
+        self.title_float = 'CudaText Terminal'
+        self.hint_float = 'Terminal opened in floating window'
+        self.h_dlg = None
+    
+        self.terminal_w = 2048 # - unlimited?
+        self.termbar = None
+        
+        self._load_config()
 
-    def load_pos(self):
+        self.load_history()
+        self.h_menu = menu_proc(0, MENU_CREATE)
 
+        max_menu_size = self.max_history_loc  if self.max_history_loc > 0 else  HISTORY_GLOBAL_TAIL_LEN
+        self.menu_calls = [(lambda ind=i:self.run_cmd_n(ind)) for i in range(max_menu_size)]
+
+    def _open_init(self):
+        self.h_dlg, self.h_panels_parent = self._init_form()
+
+        if self.floating:
+            self._load_pos()
+            dlg_proc(self.h_dlg, DLG_PROP_SET, prop={
+                'border': DBORDER_SIZE,
+                'cap': self.title_float,
+                'x': self.wnd_x,
+                'y': self.wnd_y,
+                'w': self.wnd_w,
+                'h': self.wnd_h,
+                'topmost': self.floating_topmost,
+            })
+            dlg_proc(self.h_dlg, DLG_SHOW_NONMODAL)
+            h_embed = dlg_proc(0, DLG_CREATE)
+            n = dlg_proc(h_embed, DLG_CTL_ADD, prop='panel')
+            dlg_proc(h_embed, DLG_CTL_PROP_SET, index=n, prop={
+                'color': 0xababab,
+                'cap': self.hint_float,
+                'align': ALIGN_CLIENT,
+            })
+            self.h_embed = h_embed
+        else:
+            h_embed = self.h_dlg
+            self.h_embed = None
+
+        app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (self.title, h_embed, fn_icon))
+
+        timer_proc(TIMER_START, self.timer_update, 200, tag='')
+
+    def _init_form(self):
+        colors = app_proc(PROC_THEME_UI_DICT_GET,'')
+        color_btn_back = colors['ButtonBgPassive']['color']
+
+        cur_font_size = self.font_size
+
+        h = dlg_proc(0, DLG_CREATE)
+        dlg_proc(h, DLG_PROP_SET, prop={
+            'border': False,
+            'keypreview': True,
+            'on_key_down': self.form_key_down,
+            'on_show': self.form_show,
+            'on_hide': self.form_hide,
+            'color': color_btn_back,
+            })
+
+        # parent panels 
+        n = dlg_proc(h, DLG_CTL_ADD, 'panel')
+        dlg_proc(h, DLG_CTL_PROP_SET, index=n, prop={
+            'name': 'panels_parent',
+            'a_l': ('', '['),
+            'a_t': None,
+            'a_r': ('', ']'),
+            'a_b': ('', ']'),
+            'h': INPUT_H*2,
+            'cap': '',
+            })
+        h_panels_parent = dlg_proc(h, DLG_CTL_HANDLE, index=n)
+        
+        n = dlg_proc(h, DLG_CTL_ADD, 'panel')
+        dlg_proc(h, DLG_CTL_PROP_SET, index=n, prop={
+            'name': 'input_parent', 
+            'p': 'panels_parent', 
+            'align': ALIGN_CLIENT,
+            'h': INPUT_H,
+            'h_max': INPUT_H,
+            'cap': '',
+            })
+        h_input_parent = dlg_proc(h, DLG_CTL_HANDLE, index=n)
+
+        # widgets
+        n = dlg_proc(h, DLG_CTL_ADD, 'button_ex')
+        dlg_proc(h, DLG_CTL_PROP_SET, index=n, prop={
+            'name': 'break',
+            'p': 'input_parent',
+            'a_l': None,
+            'a_t': None,
+            'a_r': ('', ']'),
+            'a_b': ('', ']'),
+            'w': 90,
+            'h': INPUT_H,
+            'cap': 'Break',
+            'hint': 'Hotkey: Break',
+            'on_change': self.button_break_click,
+            })
+
+        n = dlg_proc(h, DLG_CTL_ADD, 'editor_combo')
+        dlg_proc(h, DLG_CTL_PROP_SET, index=n, prop={
+            'name': 'input',
+            'p': 'input_parent',
+            'h': INPUT_H,
+            'a_l': ('', '['),
+            'a_r': ('break', '['),
+            'a_t': ('break', '-'),
+            'font_size': cur_font_size,
+            'texthint': 'Enter command here',
+            })
+        self.input = Editor(dlg_proc(h, DLG_CTL_HANDLE, index=n))
+
+        self.input.set_prop(PROP_ONE_LINE, True)
+        self.input.set_prop(PROP_GUTTER_ALL, True)
+        self.input.set_prop(PROP_GUTTER_NUM, False)
+        self.input.set_prop(PROP_GUTTER_FOLD, False)
+        self.input.set_prop(PROP_GUTTER_BM, False)
+        self.input.set_prop(PROP_GUTTER_STATES, False)
+        self.input.set_prop(PROP_UNPRINTED_SHOW, False)
+        self.input.set_prop(PROP_MARGIN, 2000)
+        self.input.set_prop(PROP_MARGIN_STRING, '')
+        self.input.set_prop(PROP_HILITE_CUR_LINE, False)
+        self.input.set_prop(PROP_HILITE_CUR_COL, False)
+
+        
+        termsstate = self._load_state()
+        self.termbar = TerminalBar(h, plugin=self, shell_str=self.shell_str, state=termsstate, 
+                    layout=self._layout, max_history=self.max_history_loc, font_size=self.font_size)
+                    
+        self._apply_layout_orientation(h_dlg=h, layout=self._layout)
+        
+        self.upd_history_combo()
+
+        dlg_proc(h, DLG_SCALE)
+        return h, h_panels_parent
+
+    def _exec(self, s):
+        term = self.termbar.get_active_term()
+        
+        if IS_WIN:
+            if term.p and s:
+                term.p.stdin.write((s+'\n').encode(ENC))
+                term.p.stdin.flush()
+        else:
+            if term.ch_out and s:
+                term.ch_out.write((s+'\n').encode(ENC))
+
+    def _load_state(self):
+        if os.path.exists(fn_state):
+            with open(fn_state, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return []
+        
+    def _save_state(self):
+        state = self.termbar.get_state()
+        
+        with open(fn_state, 'w', encoding='utf-8') as f:
+            json.dump(state, f, indent=2)
+            
+    def _load_config(self):
+        global ENC
+        global MAX_BUFFER
+        global ZEBRA_LIGHTNESS_DELTA
+        global TERM_WRAP
+        global SHELL_START_DIR
+        
+        if IS_WIN:
+            ENC = ini_read(fn_config, 'op', 'encoding_windows', ENC)
+
+        try:
+            MAX_BUFFER = int(ini_read(fn_config, 'op', 'max_buffer_size', str(MAX_BUFFER)))
+        except:
+            pass
+            
+        SHELL_START_DIR = ini_read(fn_config, 'op', 'start_dir', SHELL_START_DIR)
+
+        self.shell_unix = ini_read(fn_config, 'op', 'shell_unix', SHELL_UNIX)
+        self.shell_mac = ini_read(fn_config, 'op', 'shell_macos', SHELL_MAC)
+        self.shell_win = ini_read(fn_config, 'op', 'shell_windows', SHELL_WIN)
+        self.floating = str_to_bool(ini_read(fn_config, 'op', 'floating_window', '0'))
+        self.floating_topmost = str_to_bool(ini_read(fn_config, 'op', 'floating_window_topmost', '0'))
+        self.layout_horizontal = str_to_bool(ini_read(fn_config, 'op', 'layout_horizontal', '0'))
+        
+        # theme
+        colnames = ['black', 'red', 'green', 'brown', 'blue', 'magenta', 'cyan', 'white', 'brightblack',
+                    'brightred', 'brightgreen', 'brightbrown', 'brightblue', 'brightmagenta', 'brightcyan',
+                    'brightwhite', 'default', ]
+        self.theme_str_fg = ini_read(fn_config, 'op', 'shell_theme_fg', SHELL_THEME_FG)
+        self.theme_str_bg = ini_read(fn_config, 'op', 'shell_theme_bg', SHELL_THEME_BG)
+        fg_intcols = [html_color_to_int(col) for col in self.theme_str_fg.split(',')]
+        bg_intcols = [html_color_to_int(col) for col in self.theme_str_bg.split(',')]
+        if len(colnames) == len(fg_intcols) and len(colnames) == len(bg_intcols):
+            for name,fgcol,bgcol in zip(colnames, fg_intcols, bg_intcols):
+                self.colmapfg[name] = fgcol
+                self.colmapbg[name] = bgcol
+        
+        self._layout = ALIGN_RIGHT  if self.layout_horizontal else  ALIGN_TOP
+        
+        if IS_WIN:      
+            self.shell_str = self.shell_win
+        else:
+            self.shell_str = self.shell_mac  if IS_MAC else  self.shell_unix
+
+        try:
+            self.font_size = int(ini_read(fn_config, 'op', 'font_size', '9'))
+        except:
+            pass
+        
+        try:
+            self.max_history_glob = int(ini_read(fn_config, 'op', 'global_history', '50'))
+        except:
+            pass
+            
+        try:
+            self.max_history_loc = int(ini_read(fn_config, 'op', 'local_history', '10'))
+        except:
+            pass
+            
+        try:
+            ZEBRA_LIGHTNESS_DELTA = int(ini_read(fn_config, 'op', 'terminal_bg_zebra', '8'))
+        except:
+            pass
+            
+        try:
+            TERM_WRAP = int(ini_read(fn_config, 'op', 'wrap', TERM_WRAP))
+        except:
+            TERM_WRAP = ini_read(fn_config, 'op', 'wrap', TERM_WRAP)
+
+    def _load_pos(self):
         if not self.floating:
             return
         self.wnd_x = int(ini_read(fn_config, 'pos', 'x', '20'))
@@ -1241,8 +1321,7 @@ class Command:
         self.wnd_h = int(ini_read(fn_config, 'pos', 'h', '400'))
 
 
-    def save_pos(self):
-
+    def _save_pos(self):
         if not self.floating:
             return
 
@@ -1257,48 +1336,318 @@ class Command:
         ini_write(fn_config, 'pos', 'w', str(w))
         ini_write(fn_config, 'pos', 'h', str(h))
 
+    def _queue_layout_controls(self):
+        if self._layout == ALIGN_RIGHT:
+            timer_proc(TIMER_START_ONE, callback=self._update_termbar_w, interval=150)
+            
+    # update horizontal layout when termbar content changed
+    def _update_termbar_w(self, tag):
+        parent_p = dlg_proc(self.h_dlg, DLG_CTL_PROP_GET, name='panels_parent')
+        total_w = parent_p['w']
+        max_termbar_w = int(total_w * 0.6)
+        new_termbar_w = min(max_termbar_w, self.termbar.get_children_w())
+        dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, name='statusbar', prop={
+                        'w': new_termbar_w})
+            
+    # applies layout properties, starts timer to set statusbar width to w of its children
+    def _apply_layout_orientation(self, h_dlg, layout):
+        if layout == ALIGN_TOP: # vertical
+            parent_h = INPUT_H + TERMBAR_H + 4
+        else: # horizontal
+            parent_h = max(INPUT_H, TERMBAR_H)
+            
+            self._queue_layout_controls()
+            
+        dlg_proc(h_dlg, DLG_CTL_PROP_SET, name='statusbar', prop={
+                    'align':self._layout})
+        dlg_proc(h_dlg, DLG_CTL_PROP_SET, name='panels_parent', prop={
+                    'h':parent_h})
+            
+    def config(self):
+        ini_write(fn_config, 'op', 'shell_windows', self.shell_win)
+        ini_write(fn_config, 'op', 'shell_unix', self.shell_unix)
+        ini_write(fn_config, 'op', 'shell_macos', self.shell_mac)
+        ini_write(fn_config, 'op', 'start_dir', SHELL_START_DIR)
+        ini_write(fn_config, 'op', 'floating_window', bool_to_str(self.floating))
+        ini_write(fn_config, 'op', 'floating_window_topmost', bool_to_str(self.floating_topmost))
+        ini_write(fn_config, 'op', 'layout_horizontal', bool_to_str(self.layout_horizontal))
+        ini_write(fn_config, 'op', 'font_size', str(self.font_size))
+        ini_write(fn_config, 'op', 'max_buffer_size', str('{0:_}'.format(MAX_BUFFER))) # 100000 => 100_000
+        ini_write(fn_config, 'op', 'global_history', str(self.max_history_glob))
+        ini_write(fn_config, 'op', 'local_history', str(self.max_history_loc))
+        ini_write(fn_config, 'op', 'shell_theme_fg', self.theme_str_fg)
+        ini_write(fn_config, 'op', 'shell_theme_bg', self.theme_str_bg)
+        ini_write(fn_config, 'op', 'terminal_bg_zebra', str(ZEBRA_LIGHTNESS_DELTA))
+        ini_write(fn_config, 'op', 'wrap', str(TERM_WRAP))
+        
+        if IS_WIN:
+            ini_write(fn_config, 'op', 'encoding_windows', ENC)
+
+        file_open(fn_config)
+                    
+    def open(self):
+        # dont init form twice!
+        if not self.h_dlg:
+            self._open_init()
+
+        dlg_proc(self.h_dlg, DLG_CTL_FOCUS, name='input')
+
+        if self.floating:
+            # form can be hidden before, show
+            dlg_proc(self.h_dlg, DLG_SHOW_NONMODAL)
+            # via timer, to support clicking sidebar button
+            timer_proc(TIMER_START, self.dofocus, 300, tag='')
+        else:
+            activate_bottompanel((self.title, True)) #True - set focus
+
+    def timer_update(self, tag='', info=''):
+        changed = self.termbar.timer_update()
+        
+        # log("Entering in timer_update")
+        if changed:
+            self.update_output()
+
+    
+    # called on timer, if .btext changed
+    def update_output(self):
+        full_text, range_lists = self.parse_ansi_lines()
+        
+        self.memo.set_prop(PROP_RO, False)
+        self.memo.set_text_all(full_text)
+        self.apply_colors(range_lists)
+        self.memo.set_prop(PROP_RO, True)
+
+        self.memo.cmd(cmds.cCommand_GotoTextEnd)
+        self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-3)
+
+    def apply_colors(self, range_lists):
+        # range_lists - map: (fg,bg,isbold) -> (xs,ys,lens)
+        for (fg,bg,isbold),(xs,ys,lens) in range_lists.items():
+            fgcol = self.colmapfg.get(fg, self.broke_col)
+            bgcol = self.colmapbg.get(bg, self.broke_col)
+            font_bold = 1 if isbold else 0
+            
+            self.memo.attr(MARKERS_ADD_MANY, x=xs, y=ys, len=lens,
+                        color_font=fgcol, color_bg=bgcol, font_bold=font_bold)
+
+    
+    # cache - saves parsed lines, to not parse whole .btext after every shell command
+    # term._ansicache = {} # byte line -> [(plain_str, color_ranges), ...]  # splitted by terminal width
+    def parse_ansi_lines(self):
+        """ parses terminal output bytes line-by-line, caching parsing-results per line
+        """
+        term = self.termbar.get_active_term()
+        blines = term.btext.split(b'\n')
+        
+        res = []          
+        cache_used = {}
+        cache_new = {}
+        _empty_lines = 0
+        for bline in blines:
+            if bline in term._ansicache:
+                collines_l = term._ansicache[bline]
+                res.extend(collines_l)
+                
+                cache_used[bline] = collines_l
+            else:
+                try:
+                    line = bline.decode(ENC)
+                except UnicodeDecodeError as ex:
+                    if bline == blines[0]: # string's bytes were cut off => invalid unicode -- skip first line
+                        continue
+                    else:
+                        raise ex
+                
+                terminal = AnsiParser(columns=len(line), lines=1, p_in=None)
+                terminal.screen.dirty.clear()
+                terminal.feed(bline)
+                tiles = terminal.get_line_tiles() # (data, fg, bg, bold, reverse) 
+                
+                collines_l = []
+                nlines = (len(tiles)-1) // self.terminal_w + 1
+                for i in range(nlines):
+                    line_tiles = tiles[i*self.terminal_w : (i+1)*self.terminal_w]
+                  
+                    plain_str = ''.join((tile[0] for tile in line_tiles)).rstrip()
+                    color_ranges = AnsiParser.get_line_color_ranges(line_tiles)
+                
+                    colored_line = (plain_str, color_ranges)
+                    res.append(colored_line)
+                    collines_l.append(colored_line)
+                    
+                term._ansicache[bline] = collines_l # for the possibility of repeated lines 
+                cache_new[bline] = collines_l 
+                
+        # do not keep in memory lines that are no longer in term.btext
+        term._ansicache.clear()
+        term._ansicache.update(cache_used)
+        term._ansicache.update(cache_new)
+        
+        full_text = '\n'.join((item[0] for item in res))
+        
+        # for MARKERS_ADD_MANY
+        range_lists = {} # (fg,bg,isbold) -> (xs,ys,lens)
+        for i,(s,crs) in enumerate(res):
+            for cr in crs:
+                key = (cr.fgcol, cr.bgcol, cr.isbold)
+                xs,ys,lens = range_lists.setdefault(key, ([],[],[])) 
+                xs.append(cr.start)
+                ys.append(i)
+                lens.append(cr.length)
+        
+        return full_text, range_lists
+
+    def run_cmd(self, text):
+        term = self.termbar.get_active_term()
+        if not term:
+            return
+        
+        add_to_history(text, self.max_history_glob)
+        term.add_to_history(text)
+
+        text = text.lstrip(' ')
+
+        if text==BASH_CLEAR:
+            self.btext = b''
+            #self.memo.set_prop(PROP_RO, False)
+            #self.memo.set_text_all('')
+            #self.memo.set_prop(PROP_RO, True)
+            #return
+
+        self.upd_history_combo()
+        self.input.set_text_all('')
+
+        sudo = not IS_WIN and text.startswith('sudo ')
+        if sudo:
+            text = 'sudo --stdin '+text[5:]
+
+        self._exec(text)
+
+        #sleep(0.05)
+
+
+    def run_cmd_n(self, n):
+        hist = self.get_history_items()
+        
+        if n < len(hist):
+            s = hist[n]
+            self.input.set_text_all(s)
+            self.input.set_caret(len(s), 0)
+
+    def recall_cmd(self):
+        text = self.input.get_text_line(0)
+        if text:
+            recalled = ['{0}\t\t{1}'.format(s, s)  for s in history  if text in s][::-1] # new on top
+            self.input.complete_alt('\n'.join(recalled), snippet_id='terminal_pl_recall', len_chars=0)
+            
+    def show_history(self):
+        hist = self.get_history_items()
+        
+        if not hist:
+            return
+            
+        menu_proc(self.h_menu, MENU_CLEAR)
+        for i,item in enumerate(hist):
+            menu_proc(self.h_menu, MENU_ADD,
+                index=0,
+                caption=item,
+                command=self.menu_calls[i],
+                )
+
+        prop = dlg_proc(self.h_dlg, DLG_CTL_PROP_GET, name='input_parent')
+        x, y = prop['x'], prop['y']
+        
+        prop = dlg_proc(self.h_dlg, DLG_CTL_PROP_GET, name='panels_parent')
+        x_parent, y_parent = prop['x'], prop['y']
+        
+        x, y = dlg_proc(self.h_dlg, DLG_COORD_LOCAL_TO_SCREEN, index=x+x_parent, index2=y+y_parent)
+        menu_proc(self.h_menu, MENU_SHOW, command=(x, y))
 
     def upd_history_combo(self):
-
-        self.input.set_prop(PROP_COMBO_ITEMS, '\n'.join(self.history))
-
+        hist = self.get_history_items()
+            
+        if hist != None:
+            self.input.set_prop(PROP_COMBO_ITEMS, '\n'.join(hist))
 
     def load_history(self):
-
-        self.history = []
-        for i in range(self.max_history):
-            s = ini_read(fn_config, 'history', str(i), '')
-            if s:
-                self.history += [s]
-
+        if os.path.exists(fn_history):
+            with open(fn_history, 'r', encoding='utf-8') as f:
+                lines = [line.rstrip() for line in f.readlines()  if line.rstrip()]
+            if lines:
+                add_to_history(toadd=lines, maxlen=self.max_history_glob)
 
     def save_history(self):
+        if self.max_history_glob > 0:
+            with open(fn_history, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(history[-self.max_history_glob:]))
 
-        ini_proc(INI_DELETE_SECTION, fn_config, 'history')
-        for (i, s) in enumerate(self.history):
-            ini_write(fn_config, 'history', str(i), s)
+    def get_history_items(self):
+        if self.max_history_loc > 0:
+            if self.termbar:
+                term = self.termbar.get_active_term()
+                if term:
+                    hist = term.history
+                else:
+                    hist = [] # clear completion when no terminals
+            else:
+                hist = None # skip if not initted yet
+        else:
+            hist = history[-HISTORY_GLOBAL_TAIL_LEN:] # terminal history is off - give last from global history
 
-
-    def stop(self):
-        if IS_WIN:    
-            try:
-                if self.p:
-                    self.p.terminate()
-                    self.p.wait()
-            except:
-                pass
+        return hist
         
+    def close_all_terms_dlg(self, *args, **vargs):
+        answer = msg_box('Close all terminals?', MB_OK|MB_OKCANCEL |MB_ICONWARNING)
+        if answer == ID_OK:
+            self.termbar.close_all()
         
     def on_statusbar_cell_click(self, id_dlg, id_ctl, data='', info=''):
         self.termbar.on_statusbar_cell_click(id_dlg, id_ctl, data, info)
         
     def on_statusbar_menu(self, id_dlg, id_ctl, data='', info=''):
         self.termbar.on_statusbar_menu(id_dlg, id_ctl, data, info)
+            
+    def on_statusbar_cell_rename(self, ind_str=''):
+        if not self.termbar or not self.termbar.terminals: # Terminal not started
+            return
+            
+        try:
+            ind = int(ind_str)
+        except ValueError:
+            ind = -1 # rename active (menu command)
+        
+        self.termbar.run_cmd(CMD_RENAME, ind=ind)
+        
+    def on_statusbar_cell_close(self, ind_str):
+        try:
+            ind = int(ind_str)
+        except ValueError:
+            pass
+        else:
+            self.termbar.run_cmd(CMD_CLOSE, ind=ind)
+            
+    def on_set_term_icon(self, info):
+        ind, icname = info.split(chr(1))
+        ind = int(ind)
+        self.termbar.set_term_icon(ind=ind, icname=icname)
+        
+    def on_set_term_wrap(self, info):
+        ind, wrap = info.split(chr(1))
+        ind = int(ind)
+        
+        if wrap == '':
+            wrap = None
+        elif wrap == 'custom':
+            term = self.termbar.terminals[ind]
+            initial_val = term.wrap  if (term.wrap and type(term.wrap) == int) else  80  
+            answer = dlg_input('Wrap margin position:', str(initial_val))
+            try:
+                wrap = int(answer)
+            except:
+                wrap = -1
 
-    def close_all_terms_dlg(self, id_dlg, id_ctl, data='', info=''):
-        answer = msg_box('Close all terminals?', MB_OK|MB_OKCANCEL |MB_ICONWARNING)
-        if answer == ID_OK:
-            self.termbar.close_all()
+        if wrap != -1:        
+            self.termbar.set_term_wrap(ind=ind, wrap=wrap)
 
     # active editor tab changed
     def on_tab_change(self, ed_self):
@@ -1313,13 +1662,19 @@ class Command:
         self.termbar._update_statusbar_cells_bg()
         self.termbar._update_term_icons()
 
-    # on_tab_move(self, ed_self)
     def on_tab_move(self, ed_self):
         if self.termbar:
             self.termbar.on_tab_reorder()
         
-    def form_key_down(self, id_dlg, id_ctl, data='', info=''):
+    def on_snippet(self, ed_self, snippet_id, snippet_text):
+        if not self.h_dlg:
+            return
 
+        if self.input == ed_self and snippet_id == 'terminal_pl_recall':
+            self.input.set_text_all(snippet_text)
+            self.input.set_caret(len(snippet_text), 0)
+        
+    def form_key_down(self, id_dlg, id_ctl, data='', info=''):
         #Enter
         if (id_ctl==keys.VK_ENTER) and (data==''):
             text = self.input.get_text_line(0)
@@ -1329,30 +1684,30 @@ class Command:
             return False
 
         #Up/Down: scroll memo
-        if (id_ctl==keys.VK_UP) and (data==''):
+        elif (id_ctl==keys.VK_UP) and (data==''):
             self.memo.cmd(cmds.cCommand_ScrollLineUp)
             return False
 
-        if (id_ctl==keys.VK_DOWN) and (data==''):
+        elif (id_ctl==keys.VK_DOWN) and (data==''):
             self.memo.cmd(cmds.cCommand_ScrollLineDown)
             return False
 
         #PageUp/PageDown: scroll memo
-        if (id_ctl==keys.VK_PAGEUP) and (data==''):
+        elif (id_ctl==keys.VK_PAGEUP) and (data==''):
             self.memo.cmd(cmds.cCommand_ScrollPageUp)
             return False
 
-        if (id_ctl==keys.VK_PAGEDOWN) and (data==''):
+        elif (id_ctl==keys.VK_PAGEDOWN) and (data==''):
             self.memo.cmd(cmds.cCommand_ScrollPageDown)
             return False
 
         #Ctrl+Down: history menu
-        if (id_ctl==keys.VK_DOWN) and (data=='c'):
+        elif (id_ctl==keys.VK_DOWN) and (data=='c'):
             self.show_history()
             return False
 
         #Escape: go to editor
-        if (id_ctl==keys.VK_ESCAPE) and (data==''):
+        elif (id_ctl==keys.VK_ESCAPE) and (data==''):
             # Stops the timer
             timer_proc(TIMER_STOP, self.timer_update, 0)
             ed.focus()
@@ -1360,81 +1715,96 @@ class Command:
             return False
 
         #Break (cannot react to Ctrl+Break)
-        if (id_ctl==keys.VK_PAUSE):
+        elif (id_ctl==keys.VK_PAUSE):
             self.button_break_click(0, 0)
             return False
-
+            
+        #Ctrl+R: recall commands from global history
+        elif id_ctl == ord('R')  and data == 'c':
+            self.recall_cmd()
+            return False
+            
+        #elif (id_ctl==keys.VK_RIGHT) and (data=='s'):
+        #elif (id_ctl==keys.VK_LEFT) and (data=='s'):
+        # _dbg_toggle_term_hide...
 
     def form_hide(self, id_dlg, id_ctl, data='', info=''):
         timer_proc(TIMER_STOP, self.timer_update, 0)
 
-
     def form_show(self, id_dlg, id_ctl, data='', info=''):
         term_name = app_proc(PROC_BOTTOMPANEL_GET, "")
-        print(f'!on FORM_SHOW: term show: {term_name}')
+        log(f'T+: on FORM_SHOW: term show={term_name}')
+        
         if self.termbar:
             self.termbar.show_terminal(name=term_name)
 
         timer_proc(TIMER_START, self.timer_update, 300, tag='')
 
-    #TODO add on_show
-    """def on_resize(self, id_dlg, id_ctl, data='', info=''):
-        info = self.memo.get_prop(PROP_SCROLL_HORZ_INFO)
-        new_term_w = info['page']
-        if new_term_w != self.terminal_w:
-            self.terminal_w = new_term_w
-            print(f'resize: term_w:{self.terminal_w}')
-            self._ansicache.clear()
-            self.update_output('') #TODO fix arg, remove call decode, encoding ENC?"""
- 
 
     def on_exit(self, ed_self):
         self._save_state()
+        self._save_pos()
+        self.save_history()
 
         timer_proc(TIMER_STOP, self.timer_update, 0)
-        self.stop()
         
         self.termbar.on_exit()
         
-        self.save_pos()
-        self.save_history()
 
-
-    #TODO implement
     def button_break_click(self, id_dlg, id_ctl, data='', info=''):
-        self.stop()
-        self.open_process()
-
+        if self.termbar:
+            term = self.termbar.get_active_term()
+            if term:
+                term.restart_shell()
 
     def dofocus(self, tag='', info=''):
-
         timer_proc(TIMER_STOP, self.dofocus, 0)
         dlg_proc(self.h_dlg, DLG_FOCUS)
 
-
     def cmd_new_term(self):
-        self.termbar.new_term()
+        if not self.h_dlg:
+            self.open()
+        filepath = ed.get_filename()
+        self.termbar.new_term(filepath=filepath)
+        
+    def cmd_new_term_nofile(self):
+        if not self.h_dlg:
+            self.open()
+        self.termbar.new_term(filepath='')
         
     def cmd_close_last_cur(self):
+        if not self.h_dlg: # ignore if terminal wasn't opened
+            #self.open()
+            return
         self.termbar.run_cmd(CMD_CLOSE_LAST_CUR_FILE)
         
     def cmd_close_cur_term(self):
+        if not self.h_dlg: # ignore if terminal wasn't opened
+            #self.open()
+            return
         self.termbar.run_cmd(CMD_CLOSE_CURRENT)
         
     def cmd_cur_file_term_switch(self):
+        if not self.h_dlg:
+            self.open()
         self.termbar.run_cmd(CMD_CUR_FILE_TERM_SWITCH)
         
     def cmd_next(self):
+        if not self.h_dlg:
+            return
         self.termbar.run_cmd(CMD_NEXT)
         
     def cmd_previous(self):
+        if not self.h_dlg:
+            return
         self.termbar.run_cmd(CMD_PREVIOUS)
         
     def cmd_exec_selected(self):
+        if not self.h_dlg:
+            self.open()
         self.termbar.run_cmd(CMD_EXEC_SEL)
-
+        
 class AnsiParser:
-
     def __init__(self, columns, lines, p_in):
         '!!! investigate init'
         self.screen = HistoryScreen(columns, lines)
@@ -1465,3 +1835,25 @@ class AnsiParser:
         tiles = [(char.data, char.fg, char.bg, char.bold, char.reverse)
                     for char in self.screen.buffer[0].values()]
         return tiles
+
+    def get_line_color_ranges(tiles):
+        range_start = -1
+        fg = DEFAULT_FGCOL
+        bg = DEFAULT_BGCOL
+        isbold = False
+        l = []
+        for i,(ch, tfg, tbg, tbold, treverse) in enumerate(tiles):
+            if fg != tfg  or bg != tbg  or tbold != isbold: # new color range
+                # finish previous color range
+                if fg != DEFAULT_FGCOL  or bg != DEFAULT_BGCOL  or isbold: # wasnt plain text-range
+                    l.append(ColorRange(start=range_start, length=i-range_start, fgcol=fg, bgcol=bg, isbold=isbold))
+                range_start = i
+                fg = tfg
+                bg = tbg
+                isbold = tbold
+        # add last range  if any
+        if fg != DEFAULT_FGCOL  or bg != DEFAULT_BGCOL  or isbold:
+            l.append(ColorRange(start=range_start, length=len(tiles)-range_start, fgcol=fg, bgcol=bg, isbold=isbold))
+        return l  
+
+

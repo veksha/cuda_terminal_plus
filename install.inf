@@ -4,54 +4,74 @@ desc=Gives "Terminal" panel in the bottom panel of CudaText
 type=cudatext-plugin
 subdir=cuda_terminal_plus
 homepage=https://github.com/halfbrained/cuda_terminal_plus
-1.0.365
+api=1.0.367
 
 [item1]
 section=events
-events=on_exit,on_tab_change,on_tab_move
+events=on_exit,on_tab_change,on_tab_move,on_snippet
 
 [item2]
 section=commands
 caption=Terminal+\Open
 method=open
-
 [item3]
 section=commands
-caption=Terminal+\Add Terminal for current file
-method=cmd_new_term
-
+caption=Terminal+\Add Terminal for os home dir
+method=cmd_new_term_nofile
 [item4]
 section=commands
-caption=Terminal+\Close last Terminal for current file
-method=cmd_close_last_cur
-
+caption=Terminal+\Add Terminal (for current file)
+method=cmd_new_term
 [item5]
 section=commands
-caption=Terminal+\Close current Terminal
-method=cmd_close_cur_term
-
+caption=Terminal+\Rename Terminal
+method=on_statusbar_cell_rename
 [item6]
 section=commands
-caption=Terminal+\Curren File-Terminal switch
-method=cmd_cur_file_term_switch
-
-[item7]
-section=commands
-caption=Terminal+\Next
-method=cmd_next
-
-[item8]
-section=commands
-caption=Terminal+\Previous
-method=cmd_previous
-
-[item9]
-section=commands
-caption=Terminal+\Execute in terminal
-method=cmd_exec_selected
+caption=Terminal+\Close Terminal
+method=cmd_close_cur_term
 
 
 [item10]
+section=commands
+caption=Terminal+\-
+method=_
+[item11]
+section=commands
+caption=Terminal+\Focus next Terminal
+method=cmd_next
+[item12]
+section=commands
+caption=Terminal+\Focus previous Terminal
+method=cmd_previous
+
+
+[item20]
+section=commands
+caption=Terminal+\-
+method=_
+[item21]
+section=commands
+caption=Terminal+\Execute selected text in Terminal
+method=cmd_exec_selected
+[item22]
+section=commands
+caption=Terminal+\Toggle focus: editor - its Terminal
+method=cmd_cur_file_term_switch
+[item23]
+section=commands
+caption=Terminal+\Search for command in history
+method=recall_cmd
+[item24]
+section=commands
+caption=Terminal+\Close last Terminal for current file
+method=cmd_close_last_cur
+[item25]
+section=commands
+caption=Terminal+\Close all Terminals
+method=close_all_terms_dlg
+
+[item60]
 section=commands
 caption=Terminal+\Config
 method=config
