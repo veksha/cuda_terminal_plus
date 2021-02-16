@@ -85,6 +85,7 @@ cbi_fs = 'module=cuda_terminal_plus;cmd={cmd};info={info};'
 #DONE input/statusbar positioning
 #DONE self.memo width options
 #DONE remove prints
+#DONE remove f-strings
 
 #TODO windows
 #TODO update readme
@@ -92,7 +93,6 @@ cbi_fs = 'module=cuda_terminal_plus;cmd={cmd};info={info};'
 #TODO test expanduser() on win
 #TODO add hint to [+] and [x]
 
-#TODO remove f-strings
 
 # search works very fast on million of 100char strings
 def add_to_history(toadd, maxlen): 
@@ -982,6 +982,8 @@ class TerminalBar:
                         if e.get_filename() == self.active_term.filepath:
                             e.focus()
                             break
+                    else:
+                        file_open(self.active_term.filepath)
             else: # focused not editor or term: focus editor
                 ed.focus()
             
@@ -1002,7 +1004,7 @@ class TerminalBar:
                     if '\n' not in txt:
                         self.Cmd.run_cmd(txt)
                 else:
-                    caret = ed.get_carets()
+                    caret = ed.get_carets()[0]
                     caret_x,caret_y = caret[0:2]
                     txt = ed.get_text_line(caret_y).rstrip('\n')
                     if txt:
