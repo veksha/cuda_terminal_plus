@@ -30,10 +30,11 @@ fn_history = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus_histor
 fn_state = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus_state.json')
 
 fn_icon_pluss = os.path.join(os.path.dirname(__file__), 'cuda_pluss.png')
-fn_icon_cross = os.path.join(os.path.dirname(__file__), 'cuda_cross.png')
+fn_icon_cross = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_cross.png')
 
 ICON_FOLDERS = [
     os.path.join(os.path.dirname(__file__), 'terminalicons'),
+    os.path.join(app_path(APP_DIR_DATA), 'terminalicons'), #TODO test
 ]
 
 MAX_BUFFER = 100*1000
@@ -47,9 +48,9 @@ BASH_PROMPT = 'echo [$USER:$PWD]'+BASH_CHAR+' '
 BASH_CLEAR = 'clear';
 MSG_ENDED = "\nConsole process was terminated.\n"
 READSIZE = 4*1024
-HOMEDIR = os.path.expanduser('~')
 INPUT_H = 26
 TERMBAR_H = 20
+HOMEDIR = os.path.expandvars("$USERPROFILE")  if IS_WIN else  os.path.expanduser('~')
 
 ColorRange = namedtuple('ColorRange', 'start length fgcol bgcol isbold')
 DEFAULT_FGCOL = 'default' # 37
@@ -84,6 +85,8 @@ history = [] #TODO save,load,search
 #TODO windows
 #TODO update readme
 #TODO check config validity on load?
+#TODO test expanduser() on win
+#TODO add hint to [+] and [x]
 
 #TODO remove prints
 #TODO remove f-strings
@@ -107,6 +110,11 @@ def log(s):
         now = datetime.datetime.now()
         print(now.strftime("%H:%M:%S ") + s)
     pass
+    
+def pretty_path(path):
+    if path.startswith(HOMEDIR):
+        return path.replace(HOMEDIR, '~', 1)
+    return path
 
 def bool_to_str(v):
     return '1' if v else '0'
@@ -380,19 +388,10 @@ class Terminal:
                 del self.history[:-self.max_history]
                 
     def get_state(self):
-        #TODO check if ~ works on Win
-        if IS_WIN:
-            homepath = os.path.expandvars("$USERPROFILE")
-        else:
-            homepath = os.path.expandvars("$HOME")
-            
-        filepath = self.filepath.replace(homepath, '~', 1)  if self.filepath.startswith(homepath) else  self.filepath
-        cwd = self.cwd.replace(homepath, '~', 1) if self.cwd.startswith(homepath) else  self.cwd
-        
         state = {}
-        state['filepath'] = filepath
+        state['filepath'] = pretty_path(self.filepath)
         state['name'] = self.name
-        state['cwd'] = cwd
+        state['cwd'] = pretty_path(self.cwd)
         state['lastactive'] = self.lastactive
         
         state['icon'] = self.icon
@@ -424,7 +423,6 @@ class Terminal:
             return os.path.expanduser('~')
         
         return os.path.dirname(filepath)
-            
         
             
 class TerminalBar:
@@ -556,6 +554,9 @@ class TerminalBar:
         res['ic_cross'] = imagelist_proc(h_iml, IMAGELIST_ADD, fn_icon_cross)
         
         for folder in ICON_FOLDERS:
+            if not os.path.exists(folder):
+                continue
+                
             for filename in os.listdir(folder):
                 name, ext = os.path.splitext(filename)
                 
@@ -589,10 +590,10 @@ class TerminalBar:
             
             # sidebar
             panelname = 'Terminal+' if i == 0 else 'Terminal+'+str(i)
-            tooltip = 'Terminal: '+term.filepath
+            tooltip = 'Terminal: ' + pretty_path(term.filepath)
             ind = 2
             while tooltip in taken_names:
-                tooltip = 'Terminal '+ str(ind) + ": " + term.filepath
+                tooltip = 'Terminal '+ str(ind) + ": " + pretty_path(term.filepath)
                 ind += 1
             taken_names.add(tooltip)
             
@@ -725,7 +726,7 @@ class TerminalBar:
                 text = term.name[:MAX_TERM_NAME_LEN-1] + '..'
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_TEXT, index=cellind, value=text)
             
-            hint = 'Terminal+: ' + term.filepath
+            hint = 'Terminal+: ' + pretty_path(term.filepath)
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value=hint)
         
         self._update_term_icons()
@@ -1782,7 +1783,7 @@ class Command:
         if not self.h_dlg: # ignore if terminal wasn't opened
             #self.open()
             return
-        self.termbar.run_cmd(CMD_CLOSE_CURRENT)
+        self.termbar.run_cmd(CMD_CLOSE)
         
     def cmd_cur_file_term_switch(self):
         if not self.h_dlg:
