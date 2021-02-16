@@ -30,7 +30,7 @@ fn_history = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus_histor
 fn_state = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_terminal_plus_state.json')
 
 fn_icon_pluss = os.path.join(os.path.dirname(__file__), 'cuda_pluss.png')
-fn_icon_cross = os.path.join(app_path(APP_DIR_SETTINGS), 'cuda_cross.png')
+fn_icon_cross = os.path.join(os.path.dirname(__file__), 'cuda_cross.png')
 
 ICON_FOLDERS = [
     os.path.join(os.path.dirname(__file__), 'terminalicons'),
@@ -590,10 +590,10 @@ class TerminalBar:
             
             # sidebar
             panelname = 'Terminal+' if i == 0 else 'Terminal+'+str(i)
-            tooltip = 'Terminal: ' + pretty_path(term.filepath)
+            tooltip = 'Terminal: ' + pretty_path(term.filepath or term.cwd)
             ind = 2
             while tooltip in taken_names:
-                tooltip = 'Terminal '+ str(ind) + ": " + pretty_path(term.filepath)
+                tooltip = 'Terminal '+ str(ind) + ": " + pretty_path(term.filepath or term.cwd)
                 ind += 1
             taken_names.add(tooltip)
             
@@ -603,6 +603,7 @@ class TerminalBar:
                     app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (panelname, self.h_dlg, None))
                 self.sidebar_names.append(panelname)
                 
+            # sidebar hint
             app_proc(PROC_BOTTOMPANEL_SET_PROP, (panelname, icon, tooltip))
             
         if not self.terminals:
@@ -726,7 +727,7 @@ class TerminalBar:
                 text = term.name[:MAX_TERM_NAME_LEN-1] + '..'
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_TEXT, index=cellind, value=text)
             
-            hint = 'Terminal+: ' + pretty_path(term.filepath)
+            hint = 'Terminal+: ' + pretty_path(term.filepath or term.cwd) 
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value=hint)
         
         self._update_term_icons()
@@ -935,6 +936,7 @@ class TerminalBar:
                     break
             
         elif cmd == CMD_CLOSE:
+            term = None # in case of no terms
             if 'ind' in vargs: # context menu
                 term = self.terminals[vargs['ind']]
             elif self.active_term:
