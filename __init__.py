@@ -956,19 +956,16 @@ class TerminalBar:
                     
         elif cmd == CMD_CUR_FILE_TERM_SWITCH:
             is_ed_focused = vargs['is_ed_focused']
-            print(f' switch: ed focused:{is_ed_focused}')
             
             is_term_focused = self.Cmd.is_focused()
             
             if is_ed_focused:  # focus editor-file's last used terminal if any
                 if self.terminals:
-                    print(f' switch: have terms')
                     filepath = ed.get_filename()
                     if filepath:
                         term_times = {term.lastactive:ind for ind,term in enumerate(self.terminals) 
                                             if term.filepath == filepath}
                         if term_times:
-                            print(f' switch: ok')
                             last_file_term_ind = term_times[max(term_times)]
                             self.show_terminal(ind=last_file_term_ind)
                             activate_bottompanel(self.sidebar_names[last_file_term_ind])
