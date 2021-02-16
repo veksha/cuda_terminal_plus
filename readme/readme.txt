@@ -65,6 +65,11 @@ Plugin shows special cells in the statusbar:
 - "+": runs command "Add terminal for current file",
 - "X": runs command "Close all terminals".
 
+In the plugin's statusbar, cells are sorted:
+- without a file,
+- with editor tabs opened (these are sorted in order of their editor tabs),
+- last are terminals with files without an editor tab (closed files).
+
 Context menu for plugin's statusbar cells allows:
 - to rename terminal
 - to change its icon
