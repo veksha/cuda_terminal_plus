@@ -56,7 +56,7 @@ Plugin options
 --------------
 
 - 'shell_windows', 'shell_unix', 'shell_macos': shell start command for designated OS types. May include arguments.
-- 'start_dir': working directory of new temrinals. 
+- 'start_dir': working directory of new terminals. 
     Possible values:
         * 'file' - in document's directory
         * 'project' - in current project's main-file's directory 
@@ -68,7 +68,7 @@ Plugin options
 - 'font_size': terminal font size
 - 'shell_theme_fg': terminal text colors: comma separated list of html colors in this order:
     * black,red,green,brown,blue,magenta,cyan,white,brightblack,brightred,brightgreen,brightbrown,brightblue,brightmagenta,brightcyan,brightwhite,default
-- 'shell_theme_bg': terminal background colors. save format as 'shell_theme_fg'.
+- 'shell_theme_bg': terminal background colors. same format as 'shell_theme_fg'.
 - 'terminal_bg_zebra': difference in "brightness" between adjacent groups of terminal tabs of different inactive documents. Accepted values are between 0 (no difference in color) and 50.
 - 'wrap': 
 
