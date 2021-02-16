@@ -973,7 +973,7 @@ class TerminalBar:
                             self.Cmd.queue_focus_input(force=True)
                             
                         else:
-                            log('Document has no teminals: '+filepath)
+                            print('Document has no teminals: '+filepath)
                             
             elif is_term_focused: # focus terminal's editor if any
                 if self.active_term and self.active_term.filepath:
@@ -1215,6 +1215,7 @@ class Command:
         self.input.set_prop(PROP_MARGIN_STRING, '')
         self.input.set_prop(PROP_HILITE_CUR_LINE, False)
         self.input.set_prop(PROP_HILITE_CUR_COL, False)
+        self.input.set_prop(PROP_FONT, ed.get_prop(PROP_FONT, ''))
 
         
         termsstate = self._load_state()
