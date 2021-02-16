@@ -679,7 +679,7 @@ class TerminalBar:
             self._update_term_icons()
             self._update_statusbar_cells_bg()
             self.Cmd.upd_history_combo()
-            self.Cmd._queue_focus_input()
+            self.Cmd.queue_focus_input()
 
     def _apply_layout(self, layout):
         count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
@@ -696,7 +696,8 @@ class TerminalBar:
         fileinds = {}
         for i,h in enumerate(ed_handles()):
             filepath = Editor(h).get_filename()
-            fileinds[filepath] = i
+            if filepath:
+                fileinds[filepath] = i
         
         l.sort(key=lambda term: fileinds.get(term.filepath, (-1  if not term.filepath else 1000)))  
     
@@ -954,22 +955,25 @@ class TerminalBar:
                     activate_bottompanel(self.sidebar_names[ind])
                     
         elif cmd == CMD_CUR_FILE_TERM_SWITCH:
-            is_ed_focused = ed.get_prop(PROP_FOCUSED)
+            is_ed_focused = vargs['is_ed_focused']
+            print(f' switch: ed focused:{is_ed_focused}')
             
             is_term_focused = self.Cmd.is_focused()
             
             if is_ed_focused:  # focus editor-file's last used terminal if any
                 if self.terminals:
+                    print(f' switch: have terms')
                     filepath = ed.get_filename()
                     if filepath:
                         term_times = {term.lastactive:ind for ind,term in enumerate(self.terminals) 
                                             if term.filepath == filepath}
                         if term_times:
+                            print(f' switch: ok')
                             last_file_term_ind = term_times[max(term_times)]
                             self.show_terminal(ind=last_file_term_ind)
                             activate_bottompanel(self.sidebar_names[last_file_term_ind])
                             
-                            self.Cmd.input.focus()
+                            self.Cmd.queue_focus_input(force=True)
                             
                         else:
                             log('Document has no teminals: '+filepath)
@@ -1369,10 +1373,6 @@ class Command:
                     'align':self._layout})
         dlg_proc(h_dlg, DLG_CTL_PROP_SET, name='panels_parent', prop={
                     'h':parent_h})
-            
-    def _queue_focus_input(self):
-        focus_input = lambda tag: (self.input.focus()  if self.is_focused() else None)
-        timer_proc(TIMER_START_ONE, focus_input, 300, tag='') 
         
     def config(self):
         ini_write(fn_config, 'op', 'shell_windows', self.shell_win)
@@ -1607,6 +1607,10 @@ class Command:
 
         return hist
 
+    def queue_focus_input(self, force=False):
+        focus_input = lambda tag: (self.input.focus()  if force or self.is_focused() else None)
+        timer_proc(TIMER_START_ONE, focus_input, 300, tag='') 
+        
     def is_focused(self):
         if not self.h_dlg:
             return False
@@ -1754,7 +1758,7 @@ class Command:
         
         if self.termbar:
             self.termbar.show_terminal(name=term_name)
-            self._queue_focus_input()
+            self.queue_focus_input()
 
         timer_proc(TIMER_START, self.timer_update, 300, tag='')
 
@@ -1802,9 +1806,10 @@ class Command:
         self.termbar.run_cmd(CMD_CLOSE)
         
     def cmd_cur_file_term_switch(self):
+        is_ed_focused = ed.get_prop(PROP_FOCUSED)
         if not self.h_dlg:
             self.open()
-        self.termbar.run_cmd(CMD_CUR_FILE_TERM_SWITCH)
+        self.termbar.run_cmd(CMD_CUR_FILE_TERM_SWITCH, is_ed_focused=is_ed_focused)
         
     def cmd_next(self):
         if not self.h_dlg:
