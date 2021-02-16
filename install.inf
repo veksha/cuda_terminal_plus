@@ -16,19 +16,19 @@ caption=Terminal+\Open
 method=open
 [item3]
 section=commands
-caption=Terminal+\Add Terminal for os home dir
+caption=Terminal+\Add terminal for user home directory
 method=cmd_new_term_nofile
 [item4]
 section=commands
-caption=Terminal+\Add Terminal (for current file)
+caption=Terminal+\Add terminal (for current file)
 method=cmd_new_term
 [item5]
 section=commands
-caption=Terminal+\Rename Terminal
+caption=Terminal+\Rename terminal...
 method=on_statusbar_cell_rename
 [item6]
 section=commands
-caption=Terminal+\Close Terminal
+caption=Terminal+\Close terminal
 method=cmd_close_cur_term
 
 
@@ -38,11 +38,11 @@ caption=Terminal+\-
 method=_
 [item11]
 section=commands
-caption=Terminal+\Focus next Terminal
+caption=Terminal+\Focus next terminal
 method=cmd_next
 [item12]
 section=commands
-caption=Terminal+\Focus previous Terminal
+caption=Terminal+\Focus previous terminal
 method=cmd_previous
 
 
@@ -52,11 +52,11 @@ caption=Terminal+\-
 method=_
 [item21]
 section=commands
-caption=Terminal+\Execute selected text in Terminal
+caption=Terminal+\Execute selected text in terminal
 method=cmd_exec_selected
 [item22]
 section=commands
-caption=Terminal+\Toggle focus: editor - its Terminal
+caption=Terminal+\Toggle focus: editor - its terminal
 method=cmd_cur_file_term_switch
 [item23]
 section=commands
@@ -64,11 +64,11 @@ caption=Terminal+\Search for command in history
 method=recall_cmd
 [item24]
 section=commands
-caption=Terminal+\Close last Terminal for current file
+caption=Terminal+\Close last terminal for current file
 method=cmd_close_last_cur
 [item25]
 section=commands
-caption=Terminal+\Close all Terminals
+caption=Terminal+\Close all terminals...
 method=close_all_terms_dlg
 
 [item60]
