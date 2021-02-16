@@ -677,6 +677,7 @@ class TerminalBar:
             self._update_term_icons()
             self._update_statusbar_cells_bg()
             self.Cmd.upd_history_combo()
+            self.Cmd._queue_focus_input()
 
     def _apply_layout(self, layout):
         count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
@@ -1367,6 +1368,10 @@ class Command:
         dlg_proc(h_dlg, DLG_CTL_PROP_SET, name='panels_parent', prop={
                     'h':parent_h})
             
+    def _queue_focus_input(self):
+        focus_input = lambda tag: self.input.focus()
+        timer_proc(TIMER_START_ONE, focus_input, 300, tag='')
+        
     def config(self):
         ini_write(fn_config, 'op', 'shell_windows', self.shell_win)
         ini_write(fn_config, 'op', 'shell_unix', self.shell_unix)
@@ -1741,9 +1746,9 @@ class Command:
         
         if self.termbar:
             self.termbar.show_terminal(name=term_name)
+            self._queue_focus_input()
 
         timer_proc(TIMER_START, self.timer_update, 300, tag='')
-
 
     def on_exit(self, ed_self):
         self._save_state()
