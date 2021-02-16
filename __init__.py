@@ -1512,7 +1512,7 @@ class Command:
         text = text.lstrip(' ')
 
         if text==BASH_CLEAR:
-            self.btext = b''
+            term.btext = b''
             #self.memo.set_prop(PROP_RO, False)
             #self.memo.set_text_all('')
             #self.memo.set_prop(PROP_RO, True)
