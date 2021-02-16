@@ -956,8 +956,7 @@ class TerminalBar:
         elif cmd == CMD_CUR_FILE_TERM_SWITCH:
             is_ed_focused = ed.get_prop(PROP_FOCUSED)
             
-            p = dlg_proc(self.Cmd.h_dlg, DLG_PROP_GET)
-            is_term_focused = p['focused'] >= 0
+            is_term_focused = self.Cmd.is_focused()
             
             if is_ed_focused:  # focus editor-file's last used terminal if any
                 if self.terminals:
@@ -984,6 +983,7 @@ class TerminalBar:
                             break
                     else:
                         file_open(self.active_term.filepath)
+                        ed.focus()
             else: # focused not editor or term: focus editor
                 ed.focus()
             
@@ -1371,8 +1371,8 @@ class Command:
                     'h':parent_h})
             
     def _queue_focus_input(self):
-        focus_input = lambda tag: self.input.focus()
-        timer_proc(TIMER_START_ONE, focus_input, 300, tag='')
+        focus_input = lambda tag: (self.input.focus()  if self.is_focused() else None)
+        timer_proc(TIMER_START_ONE, focus_input, 300, tag='') 
         
     def config(self):
         ini_write(fn_config, 'op', 'shell_windows', self.shell_win)
@@ -1606,6 +1606,12 @@ class Command:
             hist = history[-HISTORY_GLOBAL_TAIL_LEN:] # terminal history is off - give last from global history
 
         return hist
+
+    def is_focused(self):
+        if not self.h_dlg:
+            return False
+        p = dlg_proc(self.h_dlg, DLG_PROP_GET)
+        return p['focused'] >= 0
         
     def close_all_terms_dlg(self, *args, **vargs):
         answer = msg_box('Close all terminals?', MB_OK|MB_OKCANCEL |MB_ICONWARNING)
