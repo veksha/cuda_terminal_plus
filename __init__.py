@@ -761,7 +761,7 @@ class TerminalBar:
         # rename
         h_menu = menu_proc(0, MENU_CREATE)
         callback = cb_fs.format('on_statusbar_cell_rename', termind)
-        menu_proc(h_menu, MENU_ADD, command=callback, caption='Rename')
+        menu_proc(h_menu, MENU_ADD, command=callback, caption='Rename...')
         
         # icon change
         ic_id = menu_proc(h_menu, MENU_ADD, caption='Change icon')
@@ -782,7 +782,8 @@ class TerminalBar:
         wrap_word_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='By word')
         
         callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'custom')
-        wrap_custom_caption = 'Custom: '+str(term.wrap)  if type(term.wrap) == int else  'Custom'
+        wrap_custom_caption = ('Custom column: '+str(term.wrap)+'...'  if type(term.wrap) == int 
+                                                                                else  'Custom column...')
         wrap_custom_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption=wrap_custom_caption)
         
         menu_proc(wrap_id, MENU_ADD, caption='-') # separator
