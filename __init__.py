@@ -75,12 +75,16 @@ CMD_RENAME = 108 # vargs: 'ind'=index of terminal to rename; otherwise - close a
 
 history = [] #TODO save,load,search
 
+cb_fs = 'module=cuda_terminal_plus;cmd={cmd};'
+cbi_fs = 'module=cuda_terminal_plus;cmd={cmd};info={info};'
+
 #DONE tab reorder
 #DONE implement apply_theme()
 #DONE statusbar hint migrate to proper
 #DONE terminal history
 #DONE input/statusbar positioning
 #DONE self.memo width options
+#DONE remove prints
 
 #TODO windows
 #TODO update readme
@@ -88,7 +92,6 @@ history = [] #TODO save,load,search
 #TODO test expanduser() on win
 #TODO add hint to [+] and [x]
 
-#TODO remove prints
 #TODO remove f-strings
 
 # search works very fast on million of 100char strings
@@ -123,7 +126,7 @@ def str_to_bool(s):
     return s=='1'
 
 def activate_bottompanel(name):
-    print(f' [activating panel: <{name}>]')
+    log(' [activating panel: <' + str(name) + '>]')
     app_proc(PROC_BOTTOMPANEL_ACTIVATE, name)
     
 def hex_to_rgb(col):  
@@ -326,11 +329,11 @@ class Terminal:
             else:
                 self._open_terminal()
         
-            log(f'* opened terminal: {self.name}')
+            log('* opened terminal: ' + str(self.name))
 
             self.CtlTh = ControlTh(self)
             self.CtlTh.start()
-            log(f' + started thread: {self.name}')
+            log(' + started thread: ' + str(self.name))
         
         self.lastactive = time()
         
@@ -357,7 +360,7 @@ class Terminal:
             self.p.wait()
             
     def restart_shell(self):
-        log(f'* Restarting shell: {self.name}') 
+        log('* Restarting shell: ' + str(self.name)) 
 
         self.close()
         
@@ -513,7 +516,7 @@ class TerminalBar:
             'align': self.Cmd._layout,
             'font_size': self.font_size,
             'color': color_btn_back,
-            'on_menu': f'module=cuda_terminal_plus;cmd=on_statusbar_menu;'
+            'on_menu': cb_fs.format(cmd='on_statusbar_menu')
             })
         h_sb = dlg_proc(self.h_dlg, DLG_CTL_HANDLE, index=n)
 
@@ -527,7 +530,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
-        callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_click;info=new_term;'
+        callback = cbi_fs.format(cmd='on_statusbar_cell_click', info='new_term')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
         # spacer
@@ -539,7 +542,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
-        callback = f'module=cuda_terminal_plus;cmd=close_all_terms_dlg;'
+        callback = cb_fs.format(cmd='close_all_terms_dlg')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
         return h_sb
@@ -575,7 +578,7 @@ class TerminalBar:
                     break
                 sidebar_name = self.sidebar_names.pop()
                 app_proc(PROC_BOTTOMPANEL_REMOVE, sidebar_name)
-            log(f'      new sidebar count: {len(self.sidebar_names)}: {self.sidebar_names}')
+            log('      new sidebar count: {0}: {1}'.format(len(self.sidebar_names), self.sidebar_names))
         
         taken_names = set()
                 
@@ -612,7 +615,6 @@ class TerminalBar:
             
     def _update_statusbar_cells_bg(self):
         if not hasattr(self, 'h_sb'):
-            log(f' !! NO h_sb on cells bg update')
             return
             
         colors = app_proc(PROC_THEME_UI_DICT_GET,'')
@@ -710,7 +712,7 @@ class TerminalBar:
                 cellind = statusbar_proc(self.h_sb, STATUSBAR_ADD_CELL, index=add_ind, tag=termind)
                 
                 statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
-                callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_click;info={termind};'
+                callback = cbi_fs.format(cmd='on_statusbar_cell_click', info=termind)
                 statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
                 statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
             
@@ -739,7 +741,7 @@ class TerminalBar:
 
     # [(140617069637616, 2, 2, 'ind2')], [{}]
     def on_statusbar_cell_click(self, id_dlg, id_ctl, data='', info=''):
-        log(f' cell click:{id_dlg}, {id_ctl};; {data};; {info}')
+        log(' cell click:{0}; {1}'.format(data, info))
 
         if info == 'new_term':
             filepath = ed.get_filename()
@@ -757,39 +759,37 @@ class TerminalBar:
         
         term = self.terminals[termind]
         
-        cb_fs = 'module=cuda_terminal_plus;cmd={0};info={1};'
-        
         # rename
         h_menu = menu_proc(0, MENU_CREATE)
-        callback = cb_fs.format('on_statusbar_cell_rename', termind)
+        callback = cbi_fs.format(cmd='on_statusbar_cell_rename', info=termind)
         menu_proc(h_menu, MENU_ADD, command=callback, caption='Rename...')
         
         # icon change
         ic_id = menu_proc(h_menu, MENU_ADD, caption='Change icon')
         for icname in list(sorted(self.ic_inds)):
-            callback = cb_fs.format('on_set_term_icon', str(termind) + chr(1) + icname)
+            callback = cbi_fs.format(cmd='on_set_term_icon', info=str(termind) + chr(1) + icname)
             menu_proc(ic_id, MENU_ADD, command=callback, caption=icname)
 
         # Terminal Wrap
         wrap_id = menu_proc(h_menu, MENU_ADD, caption='Terminal wrap')
         
-        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'off')
+        callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'off')
         wrap_none_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='No wrap')
         
-        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'char')
+        callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'char')
         wrap_char_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='By character')
         
-        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'word')
+        callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'word')
         wrap_word_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='By word')
         
-        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1) + 'custom')
+        callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'custom')
         wrap_custom_caption = ('Custom column: '+str(term.wrap)+'...'  if type(term.wrap) == int 
                                                                                 else  'Custom column...')
         wrap_custom_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption=wrap_custom_caption)
         
         menu_proc(wrap_id, MENU_ADD, caption='-') # separator
         
-        callback = cb_fs.format('on_set_term_wrap', str(termind) + chr(1))
+        callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1))
         menu_proc(wrap_id, MENU_ADD, command=callback, caption='Reset')
 
         if term.wrap:
@@ -806,17 +806,17 @@ class TerminalBar:
 
         # close
         menu_proc(h_menu, MENU_ADD, caption='-') # separator
-        callback = f'module=cuda_terminal_plus;cmd=on_statusbar_cell_close;info={termind};'
+        callback = cbi_fs.format(cmd='on_statusbar_cell_close', info=termind)
         menu_proc(h_menu, MENU_ADD, command=callback, caption='Close')
         
         menu_proc(h_menu, MENU_SHOW)
 
     def show_terminal(self, ind=None, name=None):
         if not self.terminals:
-            log(f'termbar: show_terminal: NO TERMINALS')
+            log('* termbar: show_terminal: NO TERMINALS')
             return
         if time() - self._start_time < 0.5:
-            log(f' ! sklipping show_term: too soon') #TODO check if still needed
+            log('* sklipping show_term: too soon') #TODO check if still needed
 
             if self.terminals and self.active_term:
                 self._show_terminal(self.terminals.index(self.active_term))
@@ -824,7 +824,7 @@ class TerminalBar:
         
         if ind == None:
             ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
-        log(f'   => Show Term:{ind}, {name}')
+        log('* Show Term:{0}, {1}'.format(ind, name))
         
         self._show_terminal(ind)
         
@@ -865,7 +865,7 @@ class TerminalBar:
             
             
     def new_term(self, filepath):
-        log(f'* new term for: [{filepath}]')
+        log('* new term for: ' + str(filepath))
 
         term = Terminal(self.h_dlg, filepath=filepath, shell=self.shell_str, font_size=self.font_size, 
                             colmapfg=self.Cmd.colmapfg, colmapbg=self.Cmd.colmapbg, max_history=self.max_history)
@@ -920,7 +920,7 @@ class TerminalBar:
             term.close()
             
     def run_cmd(self, cmd, **vargs):
-        log(f'* [cmd:{cmd} ({vargs})]')
+        log('* termbar.run_cmd:{0} ({1})'.format(cmd, vargs))
 
         if cmd == CMD_CLOSE_LAST_CUR_FILE:
             curfilepath = ed.get_filename()
@@ -1742,7 +1742,7 @@ class Command:
 
     def form_show(self, id_dlg, id_ctl, data='', info=''):
         term_name = app_proc(PROC_BOTTOMPANEL_GET, "")
-        log(f'T+: on FORM_SHOW: term show={term_name}')
+        log('* on_show, cur panel: ' + str(term_name))
         
         if self.termbar:
             self.termbar.show_terminal(name=term_name)
