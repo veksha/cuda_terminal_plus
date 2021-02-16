@@ -8,7 +8,7 @@ api=1.0.367
 
 [item1]
 section=events
-events=on_exit,on_tab_change,on_tab_move,on_snippet
+events=on_exit,on_tab_change~,on_tab_move~,on_snippet~
 
 [item2]
 section=commands
