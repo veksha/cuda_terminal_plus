@@ -758,7 +758,7 @@ class TerminalBar:
                 text = term.name[:MAX_TERM_NAME_LEN-1] + '..'
                 
             if not term.filepath:
-                text = '~'+text
+                text = '^'+text
              
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_TEXT, index=cellind, value=text)
             
