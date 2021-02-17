@@ -4,11 +4,11 @@ desc=Gives "Terminal" panel in the bottom panel of CudaText
 type=cudatext-plugin
 subdir=cuda_terminal_plus
 homepage=https://github.com/halfbrained/cuda_terminal_plus
-api=1.0.367
+api=1.0.368
 
 [item1]
 section=events
-events=on_exit,on_tab_change~,on_tab_move~,on_snippet~
+events=on_exit,on_state~,on_tab_change~,on_tab_move~,on_snippet~
 
 [item2]
 section=commands
