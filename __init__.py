@@ -73,25 +73,16 @@ CMD_PREVIOUS = 106
 CMD_EXEC_SEL = 107
 CMD_RENAME = 108 # vargs: 'ind'=index of terminal to rename; otherwise - close active terminal; 'newname'
 
-history = [] #TODO save,load,search
+history = []
 
 cb_fs = 'module=cuda_terminal_plus;cmd={cmd};'
 cbi_fs = 'module=cuda_terminal_plus;cmd={cmd};info={info};'
 
-#DONE tab reorder
-#DONE implement apply_theme()
-#DONE statusbar hint migrate to proper
-#DONE terminal history
-#DONE input/statusbar positioning
-#DONE self.memo width options
-#DONE remove prints
-#DONE remove f-strings
+#TODO apply theme on change
 
 #TODO windows
-#TODO update readme
 #TODO check config validity on load?
 #TODO test expanduser() on win
-#TODO add hint to [+] and [x]
 
 
 # search works very fast on million of 100char strings
@@ -413,6 +404,9 @@ class Terminal:
             
             if len(self.history) > self.max_history:
                 del self.history[:-self.max_history]
+               
+    def get_display_path(self):
+        return pretty_path(self.filepath or self.cwd)
                 
     def get_state(self):
         state = {}
@@ -619,11 +613,13 @@ class TerminalBar:
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=icon)
             
             # sidebar
+            displ_path = term.get_display_path()
+            
             panelname = 'Terminal+' if i == 0 else 'Terminal+'+str(i)
-            tooltip = 'Terminal: ' + pretty_path(term.filepath or term.cwd)
+            tooltip = 'Terminal: ' + displ_path
             ind = 2
             while tooltip in taken_names:
-                tooltip = 'Terminal '+ str(ind) + ": " + pretty_path(term.filepath or term.cwd)
+                tooltip = 'Terminal '+ str(ind) + ": " + displ_path
                 ind += 1
             taken_names.add(tooltip)
             
@@ -679,6 +675,9 @@ class TerminalBar:
             if term.filepath not in term_file_ind:
                 term_file_ind[term.filepath] = len(term_file_ind)
         
+        # terminals without opened file
+        opened_files = set(Editor(h).get_filename() for h in ed_handles())
+        
         for i,term in enumerate(self.terminals):
             cellind = i + self.start_extras
             
@@ -689,6 +688,7 @@ class TerminalBar:
             else: # norm
                 is_even = (term_file_ind[term.filepath]%2) == 0
                 col = color_norm  if is_even else  color_norm_alt # zebra
+            
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=col)
             
     def _show_terminal(self, ind):
@@ -762,7 +762,7 @@ class TerminalBar:
              
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_TEXT, index=cellind, value=text)
             
-            hint = 'Terminal+: ' + pretty_path(term.filepath or term.cwd) 
+            hint = 'Terminal+: ' + term.get_display_path()
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value=hint)
         
         self._update_term_icons()
