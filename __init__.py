@@ -455,7 +455,7 @@ class TerminalBar:
         self.font_size = font_size
         self.max_history = max_history
         
-        self.v_cell_range = (0.1, 1) # 0.1 - to preserve color for min values (not just give black)
+        self.v_cell_range = (0.15, 1) # 0.15 - to preserve color for min values (not just give black)
         # 'Lightness' shift (from HSV color); values are relative to active tab color from current theme
         self.v_cell_norm = -0.15
         self.v_cell_cur_file = 0
@@ -485,6 +485,8 @@ class TerminalBar:
         # ignore show_term 0.5 sec after start (to not override active_term by initial panel)
         self._start_time = time() 
         self._apply_layout(layout)
+        
+        self.on_theme_change() # to apply statusbar border color
         
     def _init_terms(self, state):
         if state:
@@ -522,10 +524,6 @@ class TerminalBar:
         TerminalBar._sort_terms(self.terminals)
         
     def _open_init(self):
-        colors = app_proc(PROC_THEME_UI_DICT_GET,'')
-        color_btn_back = colors['ButtonBgPassive']['color']
-        color_tab_passive = colors['TabPassive']['color']
-
         n = dlg_proc(self.h_dlg, DLG_CTL_ADD, 'statusbar')
         dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, index=n, prop={
             'name': 'statusbar',
@@ -533,7 +531,7 @@ class TerminalBar:
             'h': TERMBAR_H,
             'align': self.Cmd._layout,
             'font_size': self.font_size,
-            'color': color_btn_back,
+            'color': self.Cmd.color_btn_back,
             'on_menu': cb_fs.format(cmd='on_statusbar_menu')
             })
         h_sb = dlg_proc(self.h_dlg, DLG_CTL_HANDLE, index=n)
@@ -546,7 +544,7 @@ class TerminalBar:
         cellind = statusbar_proc(h_sb, STATUSBAR_ADD_CELL, index=-1)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=self.ic_inds_util['ic_pluss'])
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
-        statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
+        statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=self.Cmd.color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, 
                                                 value='Add terminal (attached to file, for named documents)')
@@ -560,7 +558,7 @@ class TerminalBar:
         cellind = statusbar_proc(h_sb, STATUSBAR_ADD_CELL, index=-1)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_IMAGEINDEX, index=cellind, value=self.ic_inds_util['ic_cross'])
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
-        statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
+        statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=self.Cmd.color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value='Close all terminals...')
         callback = cb_fs.format(cmd='close_all_terms_dlg')
@@ -640,14 +638,11 @@ class TerminalBar:
         if not hasattr(self, 'h_sb'):
             return
             
-        colors = app_proc(PROC_THEME_UI_DICT_GET,'')
-        color_tab_active = colors['TabActive']['color']
-        
         ### colors (HSV)
         v_max = max(self.v_cell_norm, self.v_cell_norm_alt, self.v_cell_cur_file, self.v_cell_active_term)
         v_min = min(self.v_cell_norm, self.v_cell_norm_alt, self.v_cell_cur_file, self.v_cell_active_term)
         
-        rgb = hex_to_rgb(color_tab_active) # (0.1, 0.2, 1.0) # rgb for .colorsys
+        rgb = hex_to_rgb(self.Cmd.color_tab_active) # (0.1, 0.2, 1.0) # rgb for .colorsys
         # calc
         h,s,v = colorsys.rgb_to_hsv(*rgb)
         
@@ -944,6 +939,18 @@ class TerminalBar:
             full_w += statusbar_proc(self.h_sb, STATUSBAR_GET_CELL_SIZE, i)
         return full_w
         
+    def on_theme_change(self):
+        self._update_statusbar_cells_bg()
+        dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, name='statusbar', prop={
+            'color': self.Cmd.color_btn_back,
+            })
+        count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
+        statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=0, value=self.Cmd.color_tab_passive)
+        statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=count-1, value=self.Cmd.color_tab_passive)
+
+        #statusbar_proc(self.h_sb, STATUSBAR_SET_COLOR_BORDER_L, value=self.Cmd.color_tab_border_active)
+        statusbar_proc(self.h_sb, STATUSBAR_SET_COLOR_BORDER_R, value=self.Cmd.color_tab_border_active)
+        
     def on_exit(self):
         for term in self.terminals:
             term.exit()
@@ -1115,6 +1122,7 @@ class Command:
         'default': 0x240a30, # purple from ubuntu theme
     }
     
+    
     def __init__(self):
         self.title = 'Terminal+'
         self.title_float = 'CudaText Terminal'
@@ -1132,6 +1140,16 @@ class Command:
         max_menu_size = self.max_history_loc  if self.max_history_loc > 0 else  HISTORY_GLOBAL_TAIL_LEN
         self.menu_calls = [(lambda ind=i:self.run_cmd_n(ind)) for i in range(max_menu_size)]
 
+    def _get_theme_colors(self):
+        colors = app_proc(PROC_THEME_UI_DICT_GET, '')
+        self.color_btn_back = colors['ButtonBgPassive']['color']
+        self.color_tab_active = colors['TabActive']['color']
+        self.color_tab_passive = colors['TabPassive']['color']
+        self.color_tab_border_active = colors['TabBorderActive']['color'] 
+        self.color_tab_border_passive = colors['TabBorderPassive']['color']
+        
+        return colors
+        
     def _open_init(self):
         self.h_dlg, self.h_panels_parent = self._init_form()
 
@@ -1164,9 +1182,8 @@ class Command:
         timer_proc(TIMER_START, self.timer_update, 200, tag='')
 
     def _init_form(self):
-        colors = app_proc(PROC_THEME_UI_DICT_GET,'')
-        color_btn_back = colors['ButtonBgPassive']['color']
-
+        self._get_theme_colors()
+        
         cur_font_size = self.font_size
 
         h = dlg_proc(0, DLG_CREATE)
@@ -1176,7 +1193,7 @@ class Command:
             'on_key_down': self.form_key_down,
             'on_show': self.form_show,
             'on_hide': self.form_hide,
-            'color': color_btn_back,
+            'color': self.color_btn_back,
             })
 
         # parent panels 
@@ -1399,7 +1416,7 @@ class Command:
                     'align':self._layout})
         dlg_proc(h_dlg, DLG_CTL_PROP_SET, name='panels_parent', prop={
                     'h':parent_h})
-        
+            
     def config(self):
         ini_write(fn_config, 'op', 'shell_windows', self.shell_win)
         ini_write(fn_config, 'op', 'shell_unix', self.shell_unix)
@@ -1787,7 +1804,29 @@ class Command:
             self.queue_focus_input()
 
         timer_proc(TIMER_START, self.timer_update, 300, tag='')
-
+        
+    def on_state(self, ed, state):
+        if self.h_dlg and state == APPSTATE_THEME_UI:
+            colors = self._get_theme_colors()
+            
+            dlg_proc(self.h_dlg, DLG_PROP_SET, prop={
+                'color': self.color_btn_back,
+            })
+            dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, name='input', prop={
+                'color': self.color_btn_back,
+            })
+            
+            for name,val in globals().items():
+                if name.startswith('COLOR_ID_') and type(val) == str:
+                    theme_item_name = val
+                    theme_item = colors.get(theme_item_name)
+                    if theme_item != None:
+                        theme_col = theme_item['color']
+                        self.input.set_prop(PROP_COLOR, (theme_item_name, theme_col))
+            
+            if self.termbar:
+                self.termbar.on_theme_change()
+                
     def on_exit(self, ed_self):
         self._save_state()
         self._save_pos()
