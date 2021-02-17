@@ -97,7 +97,7 @@ def add_to_history(toadd, maxlen):
     
     if len(history) > maxlen*1.1:
         del history[:maxlen]
-        
+    
 def log(s):
     # Change conditional to True to log messages in a Debug process
     if False:
@@ -698,7 +698,7 @@ class TerminalBar:
             self._update_term_icons()
             self._update_statusbar_cells_bg()
             self.Cmd.upd_history_combo()
-            self.Cmd.queue_focus_input()
+        self.Cmd.queue_focus_input()
 
     def _apply_layout(self, layout):
         count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
@@ -846,9 +846,9 @@ class TerminalBar:
                 self._show_terminal(self.terminals.index(self.active_term))
             return
         
-        if ind == None:
-            ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
         log('* Show Term:{0}, {1}'.format(ind, name))
+        if ind == None and name:
+            ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
         
         self._show_terminal(ind)
         
@@ -918,6 +918,11 @@ class TerminalBar:
         
     def get_active_term(self):
         return self.active_term
+        
+    def get_active_sidebar(self):
+        if self.active_term and self.active_term in self.terminals:
+            return self.sidebar_names[self.terminals.index(self.active_term)]
+        return self.sidebar_names[0]
 
     # list of term-dicts
     def get_state(self):
@@ -1136,6 +1141,8 @@ class Command:
 
         self.load_history()
         self.h_menu = menu_proc(0, MENU_CREATE)
+        
+        self._is_shown = False
 
         max_menu_size = self.max_history_loc  if self.max_history_loc > 0 else  HISTORY_GLOBAL_TAIL_LEN
         self.menu_calls = [(lambda ind=i:self.run_cmd_n(ind)) for i in range(max_menu_size)]
@@ -1143,6 +1150,7 @@ class Command:
     def _get_theme_colors(self):
         colors = app_proc(PROC_THEME_UI_DICT_GET, '')
         self.color_btn_back = colors['ButtonBgPassive']['color']
+        self.color_btn_font = colors['ButtonFont']['color']
         self.color_tab_active = colors['TabActive']['color']
         self.color_tab_passive = colors['TabPassive']['color']
         self.color_tab_border_active = colors['TabBorderActive']['color'] 
@@ -1452,7 +1460,14 @@ class Command:
             # via timer, to support clicking sidebar button
             timer_proc(TIMER_START, self.dofocus, 300, tag='')
         else:
-            activate_bottompanel((self.title, True)) #True - set focus
+            activate_bottompanel(self.termbar.get_active_sidebar()) 
+
+    def ensure_shown(self):
+        if not self._is_shown:
+            self.open()
+        if not app_proc(PROC_SHOW_BOTTOMPANEL_GET, ''):
+            app_proc(PROC_SHOW_BOTTOMPANEL_SET, True)
+            self.queue_focus_input(force=True)
 
     def timer_update(self, tag='', info=''):
         changed = self.termbar.timer_update()
@@ -1589,8 +1604,12 @@ class Command:
             self.input.set_caret(len(s), 0)
 
     def recall_cmd(self):
+        if not self.is_shown():
+            return
+        
         text = self.input.get_text_line(0)
         if text:
+            self.ensure_shown()
             recalled = ['{0}\t\t{1}'.format(s, s)  for s in history  if text in s][::-1] # new on top
             self.input.complete_alt('\n'.join(recalled), snippet_id='terminal_pl_recall', len_chars=0)
             
@@ -1660,7 +1679,11 @@ class Command:
         p = dlg_proc(self.h_dlg, DLG_PROP_GET)
         return p['focused'] >= 0
         
+    def is_shown(self):
+        return self._is_shown and app_proc(PROC_SHOW_BOTTOMPANEL_GET, '')
+        
     def close_all_terms_dlg(self, *args, **vargs):
+        self.ensure_shown()
         answer = msg_box('Close all terminals?', MB_OK|MB_OKCANCEL |MB_ICONWARNING)
         if answer == ID_OK:
             self.termbar.close_all()
@@ -1674,6 +1697,7 @@ class Command:
     def on_statusbar_cell_rename(self, ind_str=''):
         if not self.termbar or not self.termbar.terminals: # Terminal not started
             return
+        self.ensure_shown()
             
         try:
             ind = int(ind_str)
@@ -1794,16 +1818,23 @@ class Command:
 
     def form_hide(self, id_dlg, id_ctl, data='', info=''):
         timer_proc(TIMER_STOP, self.timer_update, 0)
+        
+        self._is_shown = False
 
     def form_show(self, id_dlg, id_ctl, data='', info=''):
         term_name = app_proc(PROC_BOTTOMPANEL_GET, "")
+        if not term_name.startswith('Terminal+'): # not Terminal+ panel can be active
+            return
+            
         log('* on_show, cur panel: ' + str(term_name))
         
         if self.termbar:
             self.termbar.show_terminal(name=term_name)
-            self.queue_focus_input()
+            self.queue_focus_input(force=True)
 
         timer_proc(TIMER_START, self.timer_update, 300, tag='')
+        
+        self._is_shown = True
         
     def on_state(self, ed, state):
         if self.h_dlg and state == APPSTATE_THEME_UI:
@@ -1842,31 +1873,28 @@ class Command:
             term = self.termbar.get_active_term()
             if term:
                 term.restart_shell()
+            self.queue_focus_input()
 
     def dofocus(self, tag='', info=''):
         timer_proc(TIMER_STOP, self.dofocus, 0)
         dlg_proc(self.h_dlg, DLG_FOCUS)
 
     def cmd_new_term(self):
-        if not self.h_dlg:
-            self.open()
+        self.ensure_shown()
         filepath = ed.get_filename()
         self.termbar.new_term(filepath=filepath)
         
     def cmd_new_term_nofile(self):
-        if not self.h_dlg:
-            self.open()
+        self.ensure_shown()
         self.termbar.new_term(filepath='')
         
     def cmd_close_last_cur(self):
-        if not self.h_dlg: # ignore if terminal wasn't opened
-            #self.open()
+        if not self.is_shown(): # ignore if terminal panel is closed
             return
         self.termbar.run_cmd(CMD_CLOSE_LAST_CUR_FILE)
         
     def cmd_close_cur_term(self):
-        if not self.h_dlg: # ignore if terminal wasn't opened
-            #self.open()
+        if not self.is_shown(): # ignore if terminal panel is closed
             return
         self.termbar.run_cmd(CMD_CLOSE)
         
@@ -1877,19 +1905,16 @@ class Command:
         self.termbar.run_cmd(CMD_CUR_FILE_TERM_SWITCH, is_ed_focused=is_ed_focused)
         
     def cmd_next(self):
-        if not self.h_dlg:
-            return
+        self.ensure_shown()
         self.termbar.run_cmd(CMD_NEXT)
         
     def cmd_previous(self):
-        if not self.h_dlg:
-            return
+        self.ensure_shown()
         self.termbar.run_cmd(CMD_PREVIOUS)
         
     def cmd_exec_selected(self):
-        if not self.h_dlg:
-            self.open()
-        self.termbar.run_cmd(CMD_EXEC_SEL)
+        if self.is_shown(): # only when visible
+            self.termbar.run_cmd(CMD_EXEC_SEL)
         
 class AnsiParser:
     def __init__(self, columns, lines, p_in):
