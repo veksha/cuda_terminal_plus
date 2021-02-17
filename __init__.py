@@ -50,7 +50,7 @@ MSG_ENDED = "\nConsole process was terminated.\n"
 READSIZE = 4*1024
 INPUT_H = 26
 TERMBAR_H = 20
-HOMEDIR = os.path.expandvars("$USERPROFILE")  if IS_WIN else  os.path.expanduser('~')
+HOMEDIR = os.path.expanduser('~') # should work on Windows
 
 ColorRange = namedtuple('ColorRange', 'start length fgcol bgcol isbold')
 DEFAULT_FGCOL = 'default' # 37
@@ -441,7 +441,7 @@ class Terminal:
             return os.path.dirname(filepath)  
             
         if SHELL_START_DIR == 'user' or not filepath:
-            return os.path.expanduser('~')
+            return HOMEDIR
         
         return os.path.dirname(filepath)
         
@@ -674,9 +674,6 @@ class TerminalBar:
         for term in self.terminals:
             if term.filepath not in term_file_ind:
                 term_file_ind[term.filepath] = len(term_file_ind)
-        
-        # terminals without opened file
-        opened_files = set(Editor(h).get_filename() for h in ed_handles())
         
         for i,term in enumerate(self.terminals):
             cellind = i + self.start_extras
