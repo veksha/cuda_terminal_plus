@@ -455,11 +455,11 @@ class TerminalBar:
         self.font_size = font_size
         self.max_history = max_history
         
-        self.v_cell_range = (0.15, 1) # 0.15 - to preserve color for min values (not just give black)
+        self.v_cell_range = (0.10, 1) # 0.12 - to preserve color for min values (not just give black)
         # 'Lightness' shift (from HSV color); values are relative to active tab color from current theme
-        self.v_cell_norm = -0.15
+        self.v_cell_norm = -0.15*0.7
         self.v_cell_cur_file = 0
-        self.v_cell_active_term = +0.20
+        self.v_cell_active_term = +0.15*0.7
 
         v_zebra = max(0, min(0.5, ZEBRA_LIGHTNESS_DELTA*0.01)) # clamp to 0.0-0.5
         self.v_cell_norm_alt = self.v_cell_norm - v_zebra # -0.225 # for zebra
