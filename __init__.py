@@ -1,4 +1,3 @@
-#!!! fails to exit after 'Break'
 import sys
 import datetime
 import os
@@ -555,6 +554,8 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
+        statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, 
+                                                value='Add terminal (attached to file, for named documents)')
         callback = cbi_fs.format(cmd='on_statusbar_cell_click', info='new_term')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
@@ -567,6 +568,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
+        statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value='Close all terminals...')
         callback = cb_fs.format(cmd='close_all_terms_dlg')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
