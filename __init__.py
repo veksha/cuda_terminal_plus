@@ -1,3 +1,4 @@
+#!!! fails to exit after 'Break'
 import sys
 import datetime
 import os
@@ -143,13 +144,29 @@ class ControlTh(Thread):
 
     def add_buf(self, s, clear):
         self.Cmd.block.acquire()
+        
+        ### main thread is stopped here
         self.Cmd.btextchanged = True
         # limit the buffer size!
         self.Cmd.btext = (self.Cmd.btext+s)[-MAX_BUFFER:]
         if clear:
+            
+            if self.Cmd.ch_out and self.Cmd.ch_pid > 0:
+                try:
+                    os.waitpid(self.Cmd.ch_pid, os.WNOHANG) # check if current child terminal process exists
+                except ChildProcessError:
+                    # child process is gone, close stuff  (terminal exited by itself)
+                    ch_out = self.Cmd.ch_out
+                    self.Cmd.ch_out = None
+                    self.Cmd.ch_pid = -1
+            
+                    if ch_out:
+                        ch_out.close()
+                else:
+                    # child exists, continue reading  (shell process got restarted by Terminal())
+                    pass
+                
             self.Cmd.p=None
-            self.Cmd.ch_pid = -1
-            self.Cmd.ch_out.close()
         self.Cmd.block.release()
 
     def run(self):
@@ -162,7 +179,8 @@ class ControlTh(Thread):
                 try:
                     s = self.Cmd.ch_out.read(READSIZE)
                 except OSError:
-                    self.add_buf(b'', clear=True)
+                    s = MSG_ENDED.encode(ENC)
+                    self.add_buf(s, clear=True)
                     # don't break, shell will be restarted
                 else: # no exception
                     if s != '':
@@ -227,7 +245,7 @@ class Terminal:
         
         self._ansicache = {}
         
-        self.stop_t = False # stop thread
+        self.stop_t = False
         self.btext = b''
         self.btextchanged = False
         self.block = Lock()
@@ -345,37 +363,44 @@ class Terminal:
             h_ed = self.memo.get_prop(PROP_HANDLE_SELF)
             dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, name=self.memo_wgt_name, prop={'vis':False})
             
-    def close(self):
+    def exit(self):
         self.stop_t = True # stop thread
-        if self.block.locked():     self.block.release()
-        if self.ch_pid >= 0:        
+        self.stop()
+        
+        if self.block.locked(): # allow control thread to stop
+            self.block.release()
+            
+    def stop(self):
+        ch_pid = self.ch_pid
+        ch_out = self.ch_out
+        self.ch_pid = -1
+        self.ch_out = None
+        
+        if ch_pid >= 0:        
             # SIGTERM doesnt kill bash if bash has something running => hangs on waitpid()
             #   ... close properly is an unreliable pain
             #os.kill(self.ch_pid, signal.SIGTERM)
-            os.kill(self.ch_pid, signal.SIGKILL)
-            os.waitpid(self.ch_pid, 0) # otherwise get a zombie;  0 - normal operation
-        if self.ch_out:             self.ch_out.close()
+            os.kill(ch_pid, signal.SIGKILL)
+            os.waitpid(ch_pid, 0) # otherwise get a zombie;  0 - normal operation
+        if ch_out:             
+            ch_out.close()
         if self.p:                  
             self.p.terminate()
             self.p.wait()
             
+            
     def restart_shell(self):
         log('* Restarting shell: ' + str(self.name)) 
-
-        self.close()
+        self.stop()
         
         # restarting (should preserve previous output...)
-        self.block.acquire()
-        self.stop_t = False
+        #self.block.acquire()
         
         if IS_WIN:
             self._open_process()
         else:
             self._open_terminal()
             
-        self.CtlTh = ControlTh(self)
-        self.CtlTh.start()
-        
     def set_wrap(self, wrap):
         self.wrap = wrap
         wrap = self.wrap or TERM_WRAP
@@ -729,6 +754,10 @@ class TerminalBar:
                 text = term.name
             else:
                 text = term.name[:MAX_TERM_NAME_LEN-1] + '..'
+                
+            if not term.filepath:
+                text = '~'+text
+             
             statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_TEXT, index=cellind, value=text)
             
             hint = 'Terminal+: ' + pretty_path(term.filepath or term.cwd) 
@@ -830,7 +859,7 @@ class TerminalBar:
         self._show_terminal(ind)
         
     def remove_term(self, term, show_next=False):
-        term.close()
+        term.exit()
         
         if term.memo:
             dlg_proc(self.h_dlg, DLG_CTL_DELETE, name=term.memo_wgt_name)
@@ -918,7 +947,7 @@ class TerminalBar:
         
     def on_exit(self):
         for term in self.terminals:
-            term.close()
+            term.exit()
             
     def run_cmd(self, cmd, **vargs):
         log('* termbar.run_cmd:{0} ({1})'.format(cmd, vargs))
