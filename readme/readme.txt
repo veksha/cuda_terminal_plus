@@ -70,6 +70,12 @@ In the plugin's statusbar, cells are sorted:
 - with editor tabs opened (these are sorted in order of their editor tabs),
 - last are terminals with files without an editor tab (closed files).
 
+Colored lines on the terminal cells show:
+- bright line on top - selected terminal
+- bright line at the bottom - terminal for currently selected document
+- dark line at the bottom - to separate terminals for different documents
+- red line at the bottom - terminal's document is current not opened in CudaText
+
 Context menu for plugin's statusbar cells allows:
 - to rename terminal
 - to change its icon
