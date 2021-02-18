@@ -10,7 +10,6 @@ from subprocess import Popen, PIPE, STDOUT
 from threading import Thread, Lock
 from collections import namedtuple
 import json
-import colorsys
 import shlex
 
 if not IS_WIN:
@@ -22,6 +21,7 @@ import cudatext_cmd as cmds
 from cudax_lib import html_color_to_int, int_to_html_color
 from cudatext import *
 
+from .mcolor import MColor
 from .pyte import *
 
 fn_icon = os.path.join(os.path.dirname(__file__), 'terminal.png')
@@ -119,13 +119,6 @@ def str_to_bool(s):
 def activate_bottompanel(name):
     log(' [activating panel: <' + str(name) + '>]')
     app_proc(PROC_BOTTOMPANEL_ACTIVATE, name)
-    
-def hex_to_rgb(col):  
-    return (col&0xff)/0xff, ((col&0xff00)>>8)/0xff, ((col&0xff0000)>>16)/0xff
-    
-def rgb_to_hex(r,g,b):
-    return (round(b*255) << 16) + (round(g*0xff) << 8) + round(r*0xff)
-    
 
 class ControlTh(Thread):
     def __init__(self, Cmd):
@@ -455,15 +448,6 @@ class TerminalBar:
         self.font_size = font_size
         self.max_history = max_history
         
-        self.v_cell_range = (0.10, 1) # 0.12 - to preserve color for min values (not just give black)
-        # 'Lightness' shift (from HSV color); values are relative to active tab color from current theme
-        self.v_cell_norm = -0.15*0.7
-        self.v_cell_cur_file = 0
-        self.v_cell_active_term = +0.15*0.7
-
-        v_zebra = max(0, min(0.5, ZEBRA_LIGHTNESS_DELTA*0.01)) # clamp to 0.0-0.5
-        self.v_cell_norm_alt = self.v_cell_norm - v_zebra # -0.225 # for zebra
-        
         self.start_extras = 1 # non-terminal cells at start
         self.end_extras = 2 # at end
         
@@ -473,6 +457,7 @@ class TerminalBar:
             'ic_pluss':self.ic_inds.pop('ic_pluss'), 
             'ic_cross':self.ic_inds.pop('ic_cross'), 
         }
+        self._update_colors()
         
         self.terminals = [] # list of Terminal()
         self.sidebar_names = []
@@ -638,30 +623,6 @@ class TerminalBar:
         if not hasattr(self, 'h_sb'):
             return
             
-        ### colors (HSV)
-        v_max = max(self.v_cell_norm, self.v_cell_norm_alt, self.v_cell_cur_file, self.v_cell_active_term)
-        v_min = min(self.v_cell_norm, self.v_cell_norm_alt, self.v_cell_cur_file, self.v_cell_active_term)
-        
-        rgb = hex_to_rgb(self.Cmd.color_tab_active) # (0.1, 0.2, 1.0) # rgb for .colorsys
-        # calc
-        h,s,v = colorsys.rgb_to_hsv(*rgb)
-        
-        delta = 0
-        if v+v_max > self.v_cell_range[1]:
-            delta = self.v_cell_range[1] - (v+v_max)
-        elif v+v_min < self.v_cell_range[0]:
-            delta = self.v_cell_range[0] - (v+v_min)
-        
-        rgb_norm =              colorsys.hsv_to_rgb(h,s, v + self.v_cell_norm + delta)
-        rgb_norm_alt =          colorsys.hsv_to_rgb(h,s, v + self.v_cell_norm_alt + delta)
-        rgb_cur_file =          colorsys.hsv_to_rgb(h,s, v + self.v_cell_cur_file + delta)
-        rgb_cur_active_term =   colorsys.hsv_to_rgb(h,s, v + self.v_cell_active_term + delta)
-            
-        color_norm = rgb_to_hex(*rgb_norm)
-        color_norm_alt = rgb_to_hex(*rgb_norm_alt)
-        color_cur_file = rgb_to_hex(*rgb_cur_file)
-        color_cur_active_term = rgb_to_hex(*rgb_cur_active_term)
-            
         editor_filepath = ed.get_filename()
         
         # for 'zebra'
@@ -669,20 +630,71 @@ class TerminalBar:
         for term in self.terminals:
             if term.filepath not in term_file_ind:
                 term_file_ind[term.filepath] = len(term_file_ind)
+                
+        opened_files = {Editor(h).get_filename() for h in ed_handles()} 
+        opened_files.add('')
         
         for i,term in enumerate(self.terminals):
             cellind = i + self.start_extras
             
+            linecol_u = 0x1fffffff # default line color
             if self.active_term == term: # active term
-                col = color_cur_active_term
-            elif term.filepath == editor_filepath: # current file
-                col = color_cur_file
+                linecol_u = self.color_cell_bright
+                
+            if term.filepath == editor_filepath: # current file
+                linecol_d = self.color_cell_bright
+            elif term.filepath not in opened_files: # file not opened in editor
+                linecol_d = self.color_cell_err
             else: # norm
                 is_even = (term_file_ind[term.filepath]%2) == 0
-                col = color_norm  if is_even else  color_norm_alt # zebra
+                linecol_d = 0x1fffffff  if is_even else  self.color_cell_dark
+                
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_LINE, index=cellind, value=linecol_u)
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_LINE2, index=cellind, value=linecol_d)
             
-            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=col)
+            statusbar_proc(self.h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=self.color_cell_bg)
             
+    # calculate cell colors
+    def _update_colors(self):
+        v_zebra = max(0, min(0.5, ZEBRA_LIGHTNESS_DELTA*0.01)) # clamp to 0.0-0.5
+        
+        # 'Lightness' shift (from HSV color); values are relative to active tab color from current theme
+        v_cell_bg = 0
+        v_cell_dark = -v_zebra
+        v_cell_bright = 0.15
+        
+        v_max = max(v_cell_bg, v_cell_dark, v_cell_bright)
+        v_min = min(v_cell_bg, v_cell_dark, v_cell_bright)
+        
+        col_tab = MColor(self.Cmd.color_tab_active)
+        if col_tab.v() + v_max > 1:
+            col_tab.v(add=(1-v_max)-col_tab.v())
+        elif col_tab.v() + v_min + 0.1 < 0:
+            col_tab.v(add=(0.1+v_min)-col_tab.v())
+        col_tab.v(add=v_cell_bg)
+        
+        col_even = MColor(src=col_tab)
+        col_even.v(add=v_cell_dark)
+        
+        col_active = MColor(src=col_tab)
+        col_active.v(add=v_cell_bright)
+        
+        # red-ish, try to preserve Saturation and Lightness of tab-color
+        col_nofile = MColor(src=col_tab) 
+        cnf_h, cnf_s, cnf_v = col_nofile.hsv()
+        cnf_h = 0 # red
+        _len = (1-cnf_s) + (1-cnf_v)
+        if _len > 0.85: # 0.15 is min saturation and lightness
+            mult = 0.85/_len
+            cnf_s = 1-((1-cnf_s)*mult)
+            cnf_v = 1-((1-cnf_v)*mult)
+        col_nofile.set_hsv((cnf_h, cnf_s, cnf_v))
+        
+        self.color_cell_bg = col_tab.hexcol() # cell bg
+        self.color_cell_bright = col_active.hexcol() # current file of selected terminal
+        self.color_cell_dark = col_even.hexcol() # zebra
+        self.color_cell_err = col_nofile.hexcol() # terminal for not-open file 
+    
     def _show_terminal(self, ind):
         self.Cmd.memo = None
         changing_term = False
@@ -945,7 +957,11 @@ class TerminalBar:
         return full_w
         
     def on_theme_change(self):
+        self._update_colors()
+        
         self._update_statusbar_cells_bg()
+        
+        # misc
         dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, name='statusbar', prop={
             'color': self.Cmd.color_btn_back,
             })

@@ -4,7 +4,7 @@ desc=Gives "Terminal" panel in the bottom panel of CudaText
 type=cudatext-plugin
 subdir=cuda_terminal_plus
 homepage=https://github.com/halfbrained/cuda_terminal_plus
-api=1.0.368
+api=1.0.369
 
 [item1]
 section=events
