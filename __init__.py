@@ -695,7 +695,7 @@ class TerminalBar:
         self.color_cell_dark = col_even.hexcol() # zebra
         self.color_cell_err = col_nofile.hexcol() # terminal for not-open file 
     
-    def _show_terminal(self, ind):
+    def _show_terminal(self, ind, focus_input=True):
         self.Cmd.memo = None
         changing_term = False
         if self.active_term  and self.active_term != self.terminals[ind]:
@@ -710,7 +710,9 @@ class TerminalBar:
             self._update_term_icons()
             self._update_statusbar_cells_bg()
             self.Cmd.upd_history_combo()
-        self.Cmd.queue_focus_input()
+        
+        if focus_input:
+            self.Cmd.queue_focus_input()
 
     def _apply_layout(self, layout):
         count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
@@ -859,9 +861,13 @@ class TerminalBar:
             return
         
         log('* Show Term:{0}, {1}'.format(ind, name))
-        if ind == None and name:
-            ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
-        
+            
+        if ind == None and name != None:
+            if name.startswith('Terminal+'): # in floating mode my panel might not be active
+                ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
+            elif self.active_term and self.active_term in self.terminals:
+                ind = self.terminals.index(self.active_term)
+            
         self._show_terminal(ind)
         
     def remove_term(self, term, show_next=False):
@@ -897,8 +903,8 @@ class TerminalBar:
         for term in [*self.terminals]:
             self.remove_term(term)
         self.refresh()
-        activate_bottompanel(self.sidebar_names[0])
-            
+        if not self.Cmd.floating:
+            activate_bottompanel(self.sidebar_names[0])
             
     def new_term(self, filepath):
         log('* new term for: ' + str(filepath))
@@ -932,7 +938,7 @@ class TerminalBar:
         return self.active_term
         
     def get_active_sidebar(self):
-        if self.active_term and self.active_term in self.terminals:
+        if not self.Cmd.floating  and self.active_term and  self.active_term in self.terminals:
             return self.sidebar_names[self.terminals.index(self.active_term)]
         return self.sidebar_names[0]
 
@@ -942,12 +948,6 @@ class TerminalBar:
         for term in self.terminals:
             l.append(term.get_state())
         return l
-
-    def on_tab_reorder(self):
-        if self.terminals:
-            TerminalBar._sort_terms(self.terminals)
-            self.refresh()
-            self._show_terminal(self.terminals.index(self.active_term))
     
     def get_children_w(self):
         count = statusbar_proc(self.h_sb, STATUSBAR_GET_COUNT)
@@ -956,12 +956,13 @@ class TerminalBar:
             full_w += statusbar_proc(self.h_sb, STATUSBAR_GET_CELL_SIZE, i)
         return full_w
         
+    def on_tab_reorder(self):
+        if self.terminals:
+            TerminalBar._sort_terms(self.terminals)
+            self.refresh()
+            self._show_terminal(self.terminals.index(self.active_term), focus_input=False)
+            
     def on_tab_change(self):
-        active_panel = app_proc(PROC_BOTTOMPANEL_GET, '')
-        
-        if active_panel not in self.sidebar_names:
-            return
-        
         self._update_statusbar_cells_bg()
         self._update_term_icons()
         
@@ -998,9 +999,8 @@ class TerminalBar:
                     self.refresh()
                     self._update_term_icons()
                     self._update_statusbar_cells_bg()
-                    if self.active_term  and self.active_term in self.terminals: 
-                        ind = self.terminals.index(self.active_term)
-                        activate_bottompanel(self.sidebar_names[ind])
+                    if not self.Cmd.floating:
+                        activate_bottompanel(self.get_active_sidebar())
                     break
             
         elif cmd == CMD_CLOSE:
@@ -1015,9 +1015,8 @@ class TerminalBar:
                 self.refresh()
                 self._update_term_icons()
                 self._update_statusbar_cells_bg()
-                if self.active_term  and self.active_term in self.terminals:
-                    ind = self.terminals.index(self.active_term)
-                    activate_bottompanel(self.sidebar_names[ind])
+                if not self.Cmd.floating:
+                    activate_bottompanel(self.get_active_sidebar())
                     
         elif cmd == CMD_CUR_FILE_TERM_SWITCH:
             is_ed_focused = vargs['is_ed_focused']
@@ -1033,10 +1032,12 @@ class TerminalBar:
                         if term_times:
                             last_file_term_ind = term_times[max(term_times)]
                             self.show_terminal(ind=last_file_term_ind)
-                            activate_bottompanel(self.sidebar_names[last_file_term_ind])
+                            #panel_name = (self.sidebar_names[last_file_term_ind] if not self.Cmd.floating 
+                                                                            #else self.get_active_sidebar())
+                            #activate_bottompanel(panel_name)
+                            self.Cmd.ensure_shown()
                             
                             self.Cmd.queue_focus_input(force=True)
-                            
                         else:
                             print('Document has no teminals: '+filepath)
                             
@@ -1482,8 +1483,8 @@ class Command:
         if self.floating:
             # form can be hidden before, show
             dlg_proc(self.h_dlg, DLG_SHOW_NONMODAL)
-            # via timer, to support clicking sidebar button
-            timer_proc(TIMER_START, self.dofocus, 300, tag='')
+            
+            self.queue_focus_input()
         else:
             activate_bottompanel(self.termbar.get_active_sidebar()) 
 
@@ -1500,7 +1501,6 @@ class Command:
         # log("Entering in timer_update")
         if changed:
             self.update_output()
-
     
     # called on timer, if .btext changed
     def update_output(self):
@@ -1766,6 +1766,11 @@ class Command:
     def on_tab_change(self, ed_self):
         if not self.termbar:
             return
+            
+        active_panel = app_proc(PROC_BOTTOMPANEL_GET, '')
+        if active_panel not in self.termbar.sidebar_names  and not self.floating:
+            return
+            
         self.termbar.on_tab_change()
         
     def on_tab_move(self, ed_self):
@@ -1841,14 +1846,12 @@ class Command:
 
     def form_show(self, id_dlg, id_ctl, data='', info=''):
         term_name = app_proc(PROC_BOTTOMPANEL_GET, "")
-        if not term_name.startswith('Terminal+'): # not Terminal+ panel can be active
-            return
-            
+        
         log('* on_show, cur panel: ' + str(term_name))
         
         if self.termbar:
             self.termbar.show_terminal(name=term_name)
-            self.queue_focus_input(force=True)
+        self.queue_focus_input(force=True)
 
         timer_proc(TIMER_START, self.timer_update, 300, tag='')
         
@@ -1892,10 +1895,6 @@ class Command:
             if term:
                 term.restart_shell()
             self.queue_focus_input()
-
-    def dofocus(self, tag='', info=''):
-        timer_proc(TIMER_STOP, self.dofocus, 0)
-        dlg_proc(self.h_dlg, DLG_FOCUS)
 
     def cmd_new_term(self):
         self.ensure_shown()
