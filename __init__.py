@@ -532,7 +532,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=self.Cmd.color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, 
-                                                value='Add terminal (attached to file, for named documents)')
+                                        value='Add terminal for current document (will be ^free for Untitled)')
         callback = cbi_fs.format(cmd='on_statusbar_cell_click', info='new_term')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
@@ -955,6 +955,15 @@ class TerminalBar:
         for i in range(count):
             full_w += statusbar_proc(self.h_sb, STATUSBAR_GET_CELL_SIZE, i)
         return full_w
+        
+    def on_tab_change(self):
+        active_panel = app_proc(PROC_BOTTOMPANEL_GET, '')
+        
+        if active_panel not in self.sidebar_names:
+            return
+        
+        self._update_statusbar_cells_bg()
+        self._update_term_icons()
         
     def on_theme_change(self):
         self._update_colors()
@@ -1757,15 +1766,8 @@ class Command:
     def on_tab_change(self, ed_self):
         if not self.termbar:
             return
-            
-        active_panel = app_proc(PROC_BOTTOMPANEL_GET, '')
+        self.termbar.on_tab_change()
         
-        if active_panel not in self.termbar.sidebar_names:
-            return
-        
-        self.termbar._update_statusbar_cells_bg()
-        self.termbar._update_term_icons()
-
     def on_tab_move(self, ed_self):
         if self.termbar:
             self.termbar.on_tab_reorder()
