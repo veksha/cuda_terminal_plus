@@ -304,7 +304,8 @@ class Terminal:
             stderr = STDOUT,
             shell = IS_WIN,
             bufsize = 0,
-            env = os.environ
+            env = os.environ,
+            cwd = self.cwd,
             )
         
     def _apply_wrap(self, wrap):
@@ -1531,6 +1532,9 @@ class Command:
         """ parses terminal output bytes line-by-line, caching parsing-results per line
         """
         term = self.termbar.get_active_term()
+        if IS_WIN:
+            return term.btext.decode(ENC), {}
+                
         blines = term.btext.split(b'\n')
         
         res = []          
