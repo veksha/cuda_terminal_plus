@@ -1,7 +1,6 @@
 import colorsys
 
 from cudax_lib import int_to_html_color
-from cudatext import *
 
 class MColor:
     def __init__(self, hexcol=None, src=None):
