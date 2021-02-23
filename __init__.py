@@ -73,6 +73,12 @@ CMD_PREVIOUS = 106
 CMD_EXEC_SEL = 107
 CMD_RENAME = 108 # vargs: 'ind'=index of terminal to rename; otherwise - close active terminal; 'newname'
 
+
+#TERM_KEY_UP = b'\x1B\x4f\x41'
+TERM_KEY_DOWN = b'\x1B\x4f\x42'
+#TERM_KEY_PAGE_UP = b'\x1B\x5B\x35\x7E'
+TERM_KEY_PAGE_DOWN = b'\x1B\x5B\x36\x7E'
+
 history = []
 
 cb_fs = 'module=cuda_terminal_plus;cmd={cmd};'
@@ -417,6 +423,11 @@ class Terminal:
         
         return state
         
+    def get_memo_sroll_vert(self):
+        ''' returns (pos, max pos)
+        '''
+        info = self.memo.get_prop(PROP_SCROLL_VERT_INFO)
+        return info['smooth_pos'], info['smooth_pos_last']
 
     def _get_memo_name():
         ind = Terminal.memo_count
@@ -1800,20 +1811,32 @@ class Command:
 
         #Up/Down: scroll memo
         elif (id_ctl==keys.VK_UP) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollLineUp)
+            if self.memo:
+                self.memo.cmd(cmds.cCommand_ScrollLineUp)
             return False
 
         elif (id_ctl==keys.VK_DOWN) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollLineDown)
+            if self.memo and self.termbar and self.termbar.active_term:
+                y,maxy = self.termbar.active_term.get_memo_sroll_vert()
+                if y >= maxy: # memo at the bottom - send arrow down
+                    self.termbar.active_term.ch_out.write(TERM_KEY_DOWN)
+                else:
+                    self.memo.cmd(cmds.cCommand_ScrollLineDown)
             return False
 
         #PageUp/PageDown: scroll memo
         elif (id_ctl==keys.VK_PAGEUP) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollPageUp)
+            if self.memo:
+                self.memo.cmd(cmds.cCommand_ScrollPageUp)
             return False
 
         elif (id_ctl==keys.VK_PAGEDOWN) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollPageDown)
+            if self.memo and self.termbar and self.termbar.active_term:
+                y,maxy = self.termbar.active_term.get_memo_sroll_vert()
+                if y >= maxy: # memo at the bottom - send page down
+                    self.termbar.active_term.ch_out.write(TERM_KEY_PAGE_DOWN)
+                else:
+                    self.memo.cmd(cmds.cCommand_ScrollPageDown)
             return False
 
         #Ctrl+Down: history menu
