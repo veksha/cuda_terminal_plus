@@ -60,6 +60,7 @@ SHELL_START_DIR = 'file' # file,project,user
 HISTORY_GLOBAL_TAIL_LEN = 10 # when terminal local history is disabled - show this many from global
 ZEBRA_LIGHTNESS_DELTA = 8 # percent
 TERM_WRAP = 'char' # off,char,word,(int)
+TERM_HEIGHT = 24
 
 SHELL_THEME_FG = '#2e3436,#cc0000,#4e9a06,#c4a000,#3465a4,#75507b,#06989a,#d3d7cf,#555753,#ef2929,#8ae234,#fce94f,#729fcf,#ad7fa8,#34e2e2,#eeeeec,#d3d7cf'
 SHELL_THEME_BG = '#2e3436,#cc0000,#4e9a06,#c4a000,#3465a4,#75507b,#06989a,#d3d7cf,#555753,#ef2929,#8ae234,#fce94f,#729fcf,#ad7fa8,#34e2e2,#eeeeec,#300a24'
@@ -72,6 +73,12 @@ CMD_NEXT = 105
 CMD_PREVIOUS = 106
 CMD_EXEC_SEL = 107
 CMD_RENAME = 108 # vargs: 'ind'=index of terminal to rename; otherwise - close active terminal; 'newname'
+
+
+#TERM_KEY_UP = b'\x1B\x4f\x41'
+TERM_KEY_DOWN = b'\x1B\x4f\x42'
+#TERM_KEY_PAGE_UP = b'\x1B\x5B\x35\x7E'
+TERM_KEY_PAGE_DOWN = b'\x1B\x5B\x36\x7E'
 
 history = []
 
@@ -329,7 +336,7 @@ class Terminal:
             if IS_WIN:
                 self._open_process()
             else:
-                self._open_terminal()
+                self._open_terminal(lines=TERM_HEIGHT)
         
             log('* opened terminal: ' + str(self.name))
 
@@ -383,7 +390,7 @@ class Terminal:
         if IS_WIN:
             self._open_process()
         else:
-            self._open_terminal()
+            self._open_terminal(lines=TERM_HEIGHT)
             
     def set_wrap(self, wrap):
         self.wrap = wrap
@@ -417,6 +424,11 @@ class Terminal:
         
         return state
         
+    def get_memo_sroll_vert(self):
+        ''' returns (pos, max pos)
+        '''
+        info = self.memo.get_prop(PROP_SCROLL_VERT_INFO)
+        return info['smooth_pos'], info['smooth_pos_last']
 
     def _get_memo_name():
         ind = Terminal.memo_count
@@ -1338,6 +1350,7 @@ class Command:
         global ZEBRA_LIGHTNESS_DELTA
         global TERM_WRAP
         global SHELL_START_DIR
+        global TERM_HEIGHT
         
         if IS_WIN:
             ENC = ini_read(fn_config, 'op', 'encoding_windows', ENC)
@@ -1400,6 +1413,11 @@ class Command:
             TERM_WRAP = int(ini_read(fn_config, 'op', 'wrap', TERM_WRAP))
         except:
             TERM_WRAP = ini_read(fn_config, 'op', 'wrap', TERM_WRAP)
+            
+        try:
+            TERM_HEIGHT = int(ini_read(fn_config, 'op', 'terminal_height', str(TERM_HEIGHT)))
+        except:
+            pass
 
     def _load_pos(self):
         if not self.floating:
@@ -1468,6 +1486,7 @@ class Command:
         ini_write(fn_config, 'op', 'shell_theme_bg', self.theme_str_bg)
         ini_write(fn_config, 'op', 'terminal_bg_zebra', str(ZEBRA_LIGHTNESS_DELTA))
         ini_write(fn_config, 'op', 'wrap', str(TERM_WRAP))
+        ini_write(fn_config, 'op', 'terminal_height', str(TERM_HEIGHT))
         
         if IS_WIN:
             ini_write(fn_config, 'op', 'encoding_windows', ENC)
@@ -1800,20 +1819,32 @@ class Command:
 
         #Up/Down: scroll memo
         elif (id_ctl==keys.VK_UP) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollLineUp)
+            if self.memo:
+                self.memo.cmd(cmds.cCommand_ScrollLineUp)
             return False
 
         elif (id_ctl==keys.VK_DOWN) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollLineDown)
+            if self.memo and self.termbar and self.termbar.active_term:
+                y,maxy = self.termbar.active_term.get_memo_sroll_vert()
+                if y >= maxy: # memo at the bottom - send arrow down
+                    self.termbar.active_term.ch_out.write(TERM_KEY_DOWN)
+                else:
+                    self.memo.cmd(cmds.cCommand_ScrollLineDown)
             return False
 
         #PageUp/PageDown: scroll memo
         elif (id_ctl==keys.VK_PAGEUP) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollPageUp)
+            if self.memo:
+                self.memo.cmd(cmds.cCommand_ScrollPageUp)
             return False
 
         elif (id_ctl==keys.VK_PAGEDOWN) and (data==''):
-            self.memo.cmd(cmds.cCommand_ScrollPageDown)
+            if self.memo and self.termbar and self.termbar.active_term:
+                y,maxy = self.termbar.active_term.get_memo_sroll_vert()
+                if y >= maxy: # memo at the bottom - send page down
+                    self.termbar.active_term.ch_out.write(TERM_KEY_PAGE_DOWN)
+                else:
+                    self.memo.cmd(cmds.cCommand_ScrollPageDown)
             return False
 
         #Ctrl+Down: history menu
