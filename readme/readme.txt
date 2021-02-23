@@ -61,6 +61,8 @@ Plugin features
 
 Plugin loads ~/.bashrc if Bash is used, so Bash aliases must work.
 
+Output of interactive programs can be scrolled with 'Down' and 'Page Down' keys.
+
 Plugin shows special cells in the statusbar:
 - "+": runs command "Add terminal for current file",
 - "X": runs command "Close all terminals".
@@ -138,6 +140,8 @@ Plugin options
 - 'local_history': Max number of commands saved in the terminal's local history. 0 to disable.
 - 'global_history': Max number of commands saved in plugin's global history,
   accessed via command 'Search for command in history'.
+- 'terminal_height': internal terminal height, for programs that modify their output 
+  depending on terminal dimensions (like 'less')
 
 
 About
