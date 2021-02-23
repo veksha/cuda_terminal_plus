@@ -1,3 +1,4 @@
-# cuda_terminal_plus (WIP)
+# cuda_terminal_plus
+Terminal Plus plugin for CudaText
 
-Danger: Under Construction
+[screenshot](readme/screenshot.png)

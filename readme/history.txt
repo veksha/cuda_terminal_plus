@@ -1,3 +1,6 @@
+2021.02.23
++ add: better support for 'less' output: send scroll commands to process on arrow-down press
++ add: option 'terminal_height' 
 
 2021.02.15
 initial version
