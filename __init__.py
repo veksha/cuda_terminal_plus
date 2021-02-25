@@ -21,6 +21,9 @@ import cudatext_cmd as cmds
 from cudax_lib import html_color_to_int, int_to_html_color
 from cudatext import *
 
+from cudax_lib import get_translation
+_ = get_translation(__file__)  # I18N
+
 from .mcolor import MColor
 from .pyte import *
 
@@ -46,7 +49,7 @@ ENC = 'cp866' if IS_WIN else 'utf8'
 BASH_CHAR = '#' if IS_UNIX_ROOT else '$'
 BASH_PROMPT = 'echo [$USER:$PWD]'+BASH_CHAR+' '
 BASH_CLEAR = 'clear';
-MSG_ENDED = "\nConsole process was terminated.\n"
+MSG_ENDED = _("\nConsole process was terminated.\n")
 READSIZE = 4*1024
 INPUT_H = 26
 TERMBAR_H = 20
@@ -89,7 +92,7 @@ cbi_fs = 'module=cuda_terminal_plus;cmd={cmd};info={info};'
 
 #TODO windows
 #TODO check config validity on load?
-#TODO test expanduser() on win
+#TODO test expanduser() on win -- works like a charm (fm)
 
 
 # search works very fast on million of 100char strings
@@ -186,7 +189,7 @@ class ControlTh(Thread):
                 self.Cmd.p.stdout.seek(0, 2)
                 pp2 = self.Cmd.p.stdout.tell()
                 self.Cmd.p.stdout.seek(pp1)
-                if self.Cmd.p.poll() != None:
+                if self.Cmd.p.poll() is not None:
                     s = MSG_ENDED.encode(ENC)
                     self.add_buf(s, True)
                     # don't break, shell will be restarted
@@ -425,8 +428,8 @@ class Terminal:
         return state
         
     def get_memo_sroll_vert(self):
-        ''' returns (pos, max pos)
-        '''
+        """ returns (pos, max pos)
+        """
         info = self.memo.get_prop(PROP_SCROLL_VERT_INFO)
         return info['smooth_pos'], info['smooth_pos_last']
 
@@ -545,7 +548,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=self.Cmd.color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, 
-                                        value='Add terminal for current document (will be ^free for Untitled)')
+                                        value=_('Add terminal for current document (will be ^free for Untitled)'))
         callback = cbi_fs.format(cmd='on_statusbar_cell_click', info='new_term')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
@@ -558,7 +561,7 @@ class TerminalBar:
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_AUTOSIZE, index=cellind, value=True)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_COLOR_BACK, index=cellind, value=self.Cmd.color_tab_passive)
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_ALIGN, index=cellind, value='C')
-        statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value='Close all terminals...')
+        statusbar_proc(h_sb, STATUSBAR_SET_CELL_HINT, index=cellind, value=_('Close all terminals...'))
         callback = cb_fs.format(cmd='close_all_terms_dlg')
         statusbar_proc(h_sb, STATUSBAR_SET_CELL_CALLBACK, index=cellind, value=callback)
         
@@ -813,35 +816,35 @@ class TerminalBar:
         # rename
         h_menu = menu_proc(0, MENU_CREATE)
         callback = cbi_fs.format(cmd='on_statusbar_cell_rename', info=termind)
-        menu_proc(h_menu, MENU_ADD, command=callback, caption='Rename...')
+        menu_proc(h_menu, MENU_ADD, command=callback, caption=_('Rename...'))
         
         # icon change
-        ic_id = menu_proc(h_menu, MENU_ADD, caption='Change icon')
+        ic_id = menu_proc(h_menu, MENU_ADD, caption=_('Change icon'))
         for icname in list(sorted(self.ic_inds)):
             callback = cbi_fs.format(cmd='on_set_term_icon', info=str(termind) + chr(1) + icname)
             menu_proc(ic_id, MENU_ADD, command=callback, caption=icname)
 
         # Terminal Wrap
-        wrap_id = menu_proc(h_menu, MENU_ADD, caption='Terminal wrap')
+        wrap_id = menu_proc(h_menu, MENU_ADD, caption=_('Terminal wrap'))
         
         callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'off')
-        wrap_none_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='No wrap')
+        wrap_none_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption=_('No wrap'))
         
         callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'char')
-        wrap_char_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='By character')
+        wrap_char_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption=_('By character'))
         
         callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'word')
-        wrap_word_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption='By word')
+        wrap_word_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption=_('By word'))
         
         callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1) + 'custom')
-        wrap_custom_caption = ('Custom column: '+str(term.wrap)+'...'  if type(term.wrap) == int 
-                                                                                else  'Custom column...')
+        wrap_custom_caption = (_('Custom column: ')+str(term.wrap)+'...'  if type(term.wrap) == int 
+                                                                                else  _('Custom column...'))
         wrap_custom_id = menu_proc(wrap_id, MENU_ADD, command=callback, caption=wrap_custom_caption)
         
         menu_proc(wrap_id, MENU_ADD, caption='-') # separator
         
         callback = cbi_fs.format(cmd='on_set_term_wrap', info=str(termind) + chr(1))
-        menu_proc(wrap_id, MENU_ADD, command=callback, caption='Reset')
+        menu_proc(wrap_id, MENU_ADD, command=callback, caption=_('Reset'))
 
         if term.wrap:
             if term.wrap == 'char':
@@ -858,7 +861,7 @@ class TerminalBar:
         # close
         menu_proc(h_menu, MENU_ADD, caption='-') # separator
         callback = cbi_fs.format(cmd='on_statusbar_cell_close', info=termind)
-        menu_proc(h_menu, MENU_ADD, command=callback, caption='Close')
+        menu_proc(h_menu, MENU_ADD, command=callback, caption=_('Close'))
         
         menu_proc(h_menu, MENU_SHOW)
 
@@ -875,7 +878,7 @@ class TerminalBar:
         
         log('* Show Term:{0}, {1}'.format(ind, name))
             
-        if ind == None and name != None:
+        if ind is None and name is not None:
             if name.startswith('Terminal+'): # in floating mode my panel might not be active
                 ind = 0  if name == 'Terminal+' else  int(name.split('Terminal+')[1])
             elif self.active_term and self.active_term in self.terminals:
@@ -1052,7 +1055,7 @@ class TerminalBar:
                             
                             self.Cmd.queue_focus_input(force=True)
                         else:
-                            print('Document has no teminals: '+filepath)
+                            print(_('Document has no teminals: ')+filepath)
                             
             elif is_term_focused: # focus terminal's editor if any
                 if self.active_term and self.active_term.filepath:
@@ -1100,8 +1103,8 @@ class TerminalBar:
                 term = self.active_term
                 
             if term:
-                newname = dlg_input('Rename Terminal', term.name)
-                if newname != None:
+                newname = dlg_input(_('Rename Terminal'), term.name)
+                if newname is not None:
                     term.name = newname
                     self.refresh()
                     self._update_term_icons()
@@ -1169,8 +1172,8 @@ class Command:
     
     def __init__(self):
         self.title = 'Terminal+'
-        self.title_float = 'CudaText Terminal'
-        self.hint_float = 'Terminal opened in floating window'
+        self.title_float = _('CudaText Terminal')
+        self.hint_float = _('Terminal opened in floating window')
         self.h_dlg = None
     
         self.terminal_w = 2048 # - unlimited?
@@ -1278,8 +1281,8 @@ class Command:
             'a_b': ('', ']'),
             'w': 90,
             'h': INPUT_H,
-            'cap': 'Break',
-            'hint': 'Hotkey: Break',
+            'cap': _('Break'),
+            'hint': _('Hotkey: Break'),
             'on_change': self.button_break_click,
             })
 
@@ -1292,7 +1295,7 @@ class Command:
             'a_r': ('break', '['),
             'a_t': ('break', '-'),
             'font_size': cur_font_size,
-            'texthint': 'Enter command here',
+            'texthint': _('Enter command here'),
             })
         self.input = Editor(dlg_proc(h, DLG_CTL_HANDLE, index=n))
 
@@ -1687,7 +1690,7 @@ class Command:
     def upd_history_combo(self):
         hist = self.get_history_items()
             
-        if hist != None:
+        if hist is not None:
             self.input.set_prop(PROP_COMBO_ITEMS, '\n'.join(hist))
 
     def load_history(self):
@@ -1732,7 +1735,7 @@ class Command:
         
     def close_all_terms_dlg(self, *args, **vargs):
         self.ensure_shown()
-        answer = msg_box('Close all terminals?', MB_OK|MB_OKCANCEL |MB_ICONWARNING)
+        answer = msg_box(_('Close all terminals?'), MB_OK|MB_OKCANCEL |MB_ICONWARNING)
         if answer == ID_OK:
             self.termbar.close_all()
         
@@ -1776,7 +1779,7 @@ class Command:
         elif wrap == 'custom':
             term = self.termbar.terminals[ind]
             initial_val = term.wrap  if (term.wrap and type(term.wrap) == int) else  80  
-            answer = dlg_input('Wrap margin position:', str(initial_val))
+            answer = dlg_input(_('Wrap margin position:'), str(initial_val))
             try:
                 wrap = int(answer)
             except:
@@ -1907,7 +1910,7 @@ class Command:
                 if name.startswith('COLOR_ID_') and type(val) == str:
                     theme_item_name = val
                     theme_item = colors.get(theme_item_name)
-                    if theme_item != None:
+                    if theme_item is not None:
                         theme_col = theme_item['color']
                         self.input.set_prop(PROP_COLOR, (theme_item_name, theme_col))
             

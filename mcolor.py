@@ -2,11 +2,12 @@ import colorsys
 
 from cudax_lib import int_to_html_color
 
+
 class MColor:
     def __init__(self, hexcol=None, src=None):
-        if hexcol != None:
+        if hexcol is not None:
             self.set_hexcol(hexcol)
-        elif src != None:
+        elif src is not None:
             self.set_hexcol(src.hexcol())
         
     def set_hsv(self, hsv):
@@ -24,21 +25,21 @@ class MColor:
         return self._h, self._s, self._v
     
     def h(self, add=None):
-        if add != None:
+        if add is not None:
             h = max(0, min(1, self._h + add))
             self.set_hsv((h, self._s, self._v))
         else:
             return self._h
     
     def s(self, add=None):
-        if add != None:
+        if add is not None:
             s = max(0, min(1, self._s + add))
             self.set_hsv((self._h, s, self._v))
         else:
             return self._s
     
     def v(self, add=None):
-        if add != None:
+        if add is not None:
             v = max(0, min(1, self._v + add))
             self.set_hsv((self._h, self._s, v))
         else:
