@@ -282,7 +282,7 @@ class Terminal:
         self._apply_wrap(wrap)
             
         
-    def _open_terminal(self, columns=80, lines=24):
+    def _open_terminal(self, columns=1024, lines=24):
         # child gets pid=0, fd=invalid;   
         # parent: pid=child's, fd=connected to child's terminal
         p_pid, master_fd = pty.fork()   
