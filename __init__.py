@@ -277,6 +277,7 @@ class Terminal:
         self.memo.set_prop(PROP_MICROMAP, False)
         self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextBg, self.colmapbg['default']))
         self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextFont, self.colmapfg['default']))
+        self.memo.set_prop(PROP_LINKS_REGEX, 'a^') # match nothing - disable clickable links
         
         wrap = self.wrap or TERM_WRAP
         self._apply_wrap(wrap)
