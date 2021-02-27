@@ -61,16 +61,18 @@ Plugin features
 
 Plugin loads ~/.bashrc if Bash is used, so Bash aliases must work.
 
-Output of interactive programs can be scrolled with 'Down' and 'Page Down' keys.
+Output of interactive programs like 'less' or 'git diff':
+- listing can be scrolled, but only down, with Down and PageDown keys
+- to stop interactive program, enter command "q" (with Enter)
 
 Plugin shows special cells in the statusbar:
-- "+": runs command "Add terminal for current file",
-- "X": runs command "Close all terminals".
+- "+": runs command "Add terminal for current file"
+- "X": runs command "Close all terminals"
 
 In the plugin's statusbar, cells are sorted:
-- without a file,
-- with editor tabs opened (these are sorted in order of their editor tabs),
-- last are terminals with files without an editor tab (closed files).
+- first: 'free' terminals without a file
+- with editor tabs opened (these are sorted by order of their UI tabs)
+- last: terminals for files without an UI tab (closed files)
 
 Colored lines on the terminal cells show:
 - bright line on top - selected terminal
@@ -88,7 +90,7 @@ Custom icons (resolution of 20x20) may be placed into CudaText directory
 "data/terminalicons". This folder is searched additionally to plugin's folder.
 
 Terminals are restored after app restart, the state is saved to file
-"cuda_terminal_plus_state.json" in the CudaText 'settings' directory.
+"cuda_terminal_plus_state.json" in the CudaText "settings" folder.
 
 
 Plugin options
