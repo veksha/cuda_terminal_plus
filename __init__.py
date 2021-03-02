@@ -77,7 +77,6 @@ CMD_PREVIOUS = 106
 CMD_EXEC_SEL = 107
 CMD_RENAME = 108 # vargs: 'ind'=index of terminal to rename; otherwise - close active terminal; 'newname'
 
-
 #TERM_KEY_UP = b'\x1B\x4f\x41'
 TERM_KEY_DOWN = b'\x1B\x4f\x42'
 #TERM_KEY_PAGE_UP = b'\x1B\x5B\x35\x7E'
@@ -289,9 +288,6 @@ class Terminal:
         p_pid, master_fd = pty.fork()   
         
         if p_pid == 0:  # Child.
-            if IS_MAC:
-                env['PATH'] += ':/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin'
-            
             if self.cwd:
                 os.chdir(self.cwd)
                 
@@ -300,6 +296,8 @@ class Terminal:
                         COLUMNS=str(columns), LINES=str(lines))
             if 'HOME' in os.environ:
                 env['HOME'] = os.environ['HOME']
+            if IS_MAC:
+                env['PATH'] = os.environ.get('PATH', '') + ':/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin'
             
             os.execvpe(argv[0], argv, env)
 
@@ -2023,5 +2021,4 @@ class AnsiParser:
         if fg != DEFAULT_FGCOL  or bg != DEFAULT_BGCOL  or isbold:
             l.append(ColorRange(start=range_start, length=len(tiles)-range_start, fgcol=fg, bgcol=bg, isbold=isbold))
         return l  
-
 
