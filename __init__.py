@@ -1998,8 +1998,18 @@ class AnsiParser:
         return lines
 
     def get_line_tiles(self):
-        tiles = [(char.data, char.fg, char.bg, char.bold, char.reverse)
-                    for char in self.screen.buffer[0].values()]
+        #tiles = [(char.data, char.fg, char.bg, char.bold, char.reverse)
+                    #for char in self.screen.buffer[0].values()]
+        tiles = []
+        last_i = -1
+        for i,char in self.screen.buffer[0].items():
+            if i - last_i > 1:   # missing tiles - tab character
+                delta = i-last_i
+                tabs =  (i-last_i-2)//8+1
+                tiles.extend(('\t', 'default', 'default', False, False)  for i in range(tabs))
+            tiles.append((char.data, char.fg, char.bg, char.bold, char.reverse))
+            last_i = i
+                
         return tiles
 
     def get_line_color_ranges(tiles):
