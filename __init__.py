@@ -1571,13 +1571,14 @@ class Command:
             else:
                 try:
                     line = bline.decode(ENC)
+                    linelen = len(line) + 8*line.count('\t')
                 except UnicodeDecodeError as ex:
                     if bline == blines[0]: # string's bytes were cut off => invalid unicode -- skip first line
                         continue
                     else:
                         raise ex
                 
-                terminal = AnsiParser(columns=len(line), lines=1, p_in=None)
+                terminal = AnsiParser(columns=linelen, lines=1, p_in=None)
                 terminal.screen.dirty.clear()
                 terminal.feed(bline)
                 tiles = terminal.get_line_tiles() # (data, fg, bg, bold, reverse) 
