@@ -1,3 +1,6 @@
+2021.03.04
+- fix: work on macOS for commands like "ls" which give tab-chars
+
 2021.02.23
 + add: better support for 'less' output: send scroll commands to process on arrow-down press
 + add: option 'terminal_height' 
