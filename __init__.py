@@ -1722,41 +1722,41 @@ class Command:
 
     def queue_focus_input(self, force=False):
         focus_input = lambda tag: (self.input.focus()  if force or self.is_focused() else None)
-        timer_proc(TIMER_START_ONE, focus_input, 300, tag='') 
-        
+        timer_proc(TIMER_START_ONE, focus_input, 300, tag='')
+
     def is_focused(self):
         if not self.h_dlg:
             return False
         p = dlg_proc(self.h_dlg, DLG_PROP_GET)
         return p['focused'] >= 0
-        
+
     def is_shown(self):
-        return self._is_shown and app_proc(PROC_SHOW_BOTTOMPANEL_GET, '')
-        
+        return self._is_shown  and  (self.floating or app_proc(PROC_SHOW_BOTTOMPANEL_GET, ''))
+
     def close_all_terms_dlg(self, *args, **vargs):
         self.ensure_shown()
         answer = msg_box(_('Close all terminals?'), MB_OK|MB_OKCANCEL |MB_ICONWARNING)
         if answer == ID_OK:
             self.termbar.close_all()
-        
+
     def on_statusbar_cell_click(self, id_dlg, id_ctl, data='', info=''):
         self.termbar.on_statusbar_cell_click(id_dlg, id_ctl, data, info)
-        
+
     def on_statusbar_menu(self, id_dlg, id_ctl, data='', info=''):
         self.termbar.on_statusbar_menu(id_dlg, id_ctl, data, info)
-            
+
     def on_statusbar_cell_rename(self, ind_str=''):
         if not self.termbar or not self.termbar.terminals: # Terminal not started
             return
         self.ensure_shown()
-            
+
         try:
             ind = int(ind_str)
         except ValueError:
             ind = -1 # rename active (menu command)
-        
+
         self.termbar.run_cmd(CMD_RENAME, ind=ind)
-        
+
     def on_statusbar_cell_close(self, ind_str):
         try:
             ind = int(ind_str)
