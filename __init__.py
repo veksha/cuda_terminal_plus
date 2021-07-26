@@ -357,6 +357,7 @@ class Terminal:
             dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, name=self.memo_wgt_name, prop={'vis':False})
 
     def exit(self):
+        self.memo = None
         self.stop_t = True # stop thread
         self.stop()
 
