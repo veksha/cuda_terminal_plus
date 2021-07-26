@@ -1185,6 +1185,7 @@ class Command:
         self.h_menu = menu_proc(0, MENU_CREATE)
 
         self._is_shown = False
+        self._last_cmd = None # (cmd, id(terminal))
 
         max_menu_size = self.max_history_loc  if self.max_history_loc > 0 else  HISTORY_GLOBAL_TAIL_LEN
         self.menu_calls = [(lambda ind=i:self.run_cmd_n(ind)) for i in range(max_menu_size)]
@@ -1626,6 +1627,8 @@ class Command:
         add_to_history(text, self.max_history_glob)
         term.add_to_history(text)
 
+        self._last_cmd = (text, id(term))
+
         text = text.lstrip(' ')
 
         if text==BASH_CLEAR:
@@ -1971,6 +1974,25 @@ class Command:
     def cmd_exec_selected(self):
         if self.is_shown(): # only when visible
             self.termbar.run_cmd(CMD_EXEC_SEL)
+
+    def cmd_repeat_last(self):
+        if not self._last_cmd:
+            return
+        last_cmd, term_id = self._last_cmd
+        term = next((t for t in self.termbar.terminals  if id(t) == term_id), None)
+        if not term  or  not term.memo:
+            return  msg_status(_('Last command terminal is no longer present'))
+
+        _msg = _('Execute last command?') + f' - {term.name!r}\n\n> {last_cmd}'
+        _answer = msg_box(_msg, MB_OK|MB_OKCANCEL |MB_ICONQUESTION)
+        if _answer != ID_OK:
+            return
+
+        ind = self.termbar.terminals.index(term)
+        self.termbar._show_terminal(ind=ind, focus_input=False)
+        self.run_cmd(last_cmd)
+
+        msg_status(_('Executed: ') + last_cmd)
 
 class AnsiParser:
     def __init__(self, columns, lines, p_in):

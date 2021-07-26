@@ -56,17 +56,21 @@ caption=Terminal+\Execute selected text in terminal
 method=cmd_exec_selected
 [item22]
 section=commands
+caption=Terminal+\Repeat last terminal command
+method=cmd_repeat_last
+[item23]
+section=commands
 caption=Terminal+\Toggle focus: editor - its terminal
 method=cmd_cur_file_term_switch
-[item23]
+[item24]
 section=commands
 caption=Terminal+\Search for command in history
 method=recall_cmd
-[item24]
+[item25]
 section=commands
 caption=Terminal+\Close last terminal for current file
 method=cmd_close_last_cur
-[item25]
+[item26]
 section=commands
 caption=Terminal+\Close all terminals...
 method=close_all_terms_dlg
