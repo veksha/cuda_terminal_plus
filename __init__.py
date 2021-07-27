@@ -48,7 +48,8 @@ SHELL_WIN = 'cmd.exe'
 ENC = 'cp866' if IS_WIN else 'utf8'
 BASH_CHAR = '#' if IS_UNIX_ROOT else '$'
 BASH_PROMPT = 'echo [$USER:$PWD]'+BASH_CHAR+' '
-BASH_CLEAR = 'clear';
+BASH_CLEAR = 'clear'
+CMD_CLEAR = 'cls'
 MSG_ENDED = _("\nConsole process was terminated.\n")
 READSIZE = 4*1024
 INPUT_H = 26
@@ -1284,7 +1285,7 @@ class Command:
             'w': 90,
             'h': INPUT_H,
             'cap': _('Break'),
-            'hint': _('Hotkey: Break'),
+            'hint': _('Hotkeys: Break or Ctrl+C'),
             'on_change': self.button_break_click,
             })
 
@@ -1641,7 +1642,7 @@ class Command:
 
         text = text.lstrip(' ')
 
-        if text==BASH_CLEAR:
+        if text==BASH_CLEAR  or  text==CMD_CLEAR:
             term.btext = b''
             #self.memo.set_prop(PROP_RO, False)
             #self.memo.set_text_all('')
@@ -1877,8 +1878,8 @@ class Command:
             ed.cmd(cmds.cmd_ToggleBottomPanel)
             return False
 
-        #Break (cannot react to Ctrl+Break)
-        elif (id_ctl==keys.VK_PAUSE):
+        #Break or Ctrl+C (cannot react to Ctrl+Break)
+        elif (id_ctl==keys.VK_PAUSE) or (id_ctl==ord('C') and data=='c'):
             self.button_break_click(0, 0)
             return False
 
