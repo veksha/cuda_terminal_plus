@@ -64,6 +64,7 @@ HISTORY_GLOBAL_TAIL_LEN = 10 # when terminal local history is disabled - show th
 ZEBRA_LIGHTNESS_DELTA = 8 # percent
 TERM_WRAP = 'char' # off,char,word,(int)
 TERM_HEIGHT = 24
+LOCK_H_SCROLL = False
 
 SHELL_THEME_FG = '#2e3436,#cc0000,#4e9a06,#c4a000,#3465a4,#75507b,#06989a,#d3d7cf,#555753,#ef2929,#8ae234,#fce94f,#729fcf,#ad7fa8,#34e2e2,#eeeeec,#d3d7cf'
 SHELL_THEME_BG = '#2e3436,#cc0000,#4e9a06,#c4a000,#3465a4,#75507b,#06989a,#d3d7cf,#555753,#ef2929,#8ae234,#fce94f,#729fcf,#ad7fa8,#34e2e2,#eeeeec,#300a24'
@@ -1355,6 +1356,7 @@ class Command:
         global TERM_WRAP
         global SHELL_START_DIR
         global TERM_HEIGHT
+        global LOCK_H_SCROLL
 
         if IS_WIN:
             ENC = ini_read(fn_config, 'op', 'encoding_windows', ENC)
@@ -1422,6 +1424,9 @@ class Command:
             TERM_HEIGHT = int(ini_read(fn_config, 'op', 'terminal_height', str(TERM_HEIGHT)))
         except:
             pass
+
+        _lock_h_scroll_s = ini_read(fn_config, 'op', 'lock_horizontal_scroll', bool_to_str(LOCK_H_SCROLL))
+        LOCK_H_SCROLL = str_to_bool(_lock_h_scroll_s)
 
     def _load_pos(self):
         if not self.floating:
@@ -1491,6 +1496,7 @@ class Command:
         ini_write(fn_config, 'op', 'terminal_bg_zebra', str(ZEBRA_LIGHTNESS_DELTA))
         ini_write(fn_config, 'op', 'wrap', str(TERM_WRAP))
         ini_write(fn_config, 'op', 'terminal_height', str(TERM_HEIGHT))
+        ini_write(fn_config, 'op', 'lock_horizontal_scroll', bool_to_str(LOCK_H_SCROLL))
 
         if IS_WIN:
             ini_write(fn_config, 'op', 'encoding_windows', ENC)
@@ -1530,6 +1536,8 @@ class Command:
     def update_output(self):
         full_text, range_lists = self.parse_ansi_lines()
 
+        h_pos = self.memo.get_prop(PROP_SCROLL_HORZ)  if LOCK_H_SCROLL else  None
+
         self.memo.set_prop(PROP_RO, False)
         self.memo.set_text_all(full_text)
         self.apply_colors(range_lists)
@@ -1537,6 +1545,8 @@ class Command:
 
         self.memo.cmd(cmds.cCommand_GotoTextEnd)
         self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-3)
+        if h_pos is not None:
+            h_pos = self.memo.set_prop(PROP_SCROLL_HORZ, h_pos)
 
     def apply_colors(self, range_lists):
         # range_lists - map: (fg,bg,isbold) -> (xs,ys,lens)

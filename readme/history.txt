@@ -1,3 +1,6 @@
+2021.07.27
++ add: option "lock_horizontal_scroll"
+
 2021.07.26
 + add: command "Repeat last terminal command"
 

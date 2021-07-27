@@ -137,6 +137,7 @@ Plugin options
   between 0 (no difference in color) and 50.
 
 - 'wrap': Wrap mode of too long lines.
+- 'lock_horizontal_scroll': should terminal view follow printed text horizontally
 
 - 'max_buffer_size': Limits amount of text displayed in the terminal at once (in bytes).
 - 'local_history': Max number of commands saved in the terminal's local history. 0 to disable.
