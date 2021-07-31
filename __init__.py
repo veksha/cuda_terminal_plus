@@ -294,12 +294,15 @@ class Terminal:
                 os.chdir(self.cwd)
 
             argv = shlex.split(self.shell)
-            env = dict(TERM="xterm-color", LC_ALL="en_GB.UTF-8",
+            env = dict(TERM="xterm-color",
                         COLUMNS=str(columns), LINES=str(lines))
             if 'HOME' in os.environ:
                 env['HOME'] = os.environ['HOME']
             if IS_MAC:
                 env['PATH'] = os.environ.get('PATH', '') + ':/usr/local/bin:/usr/local/sbin:/opt/local/bin:/opt/local/sbin'
+
+            _loc = {k:v for k,v in os.environ.items()  if k.startswith('LC_')}
+            env.update(_loc)
 
             os.execvpe(argv[0], argv, env)
 
