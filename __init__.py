@@ -250,6 +250,7 @@ class Terminal:
         self.p = None
 
         self.memo = None
+        self.dirty = False
 
     def _init_memo(self):
         self.memo_wgt_name = Terminal._get_memo_name()
@@ -276,13 +277,16 @@ class Terminal:
         self.memo.set_prop(PROP_MODERN_SCROLLBAR, True)
         self.memo.set_prop(PROP_MINIMAP, False)
         self.memo.set_prop(PROP_MICROMAP, False)
-        self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextBg, self.colmapbg['default']))
-        self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextFont, self.colmapfg['default']))
         self.memo.set_prop(PROP_LINKS_REGEX, 'a^') # match nothing - disable clickable links
+        self._update_memo_colors()
 
         wrap = self.wrap or TERM_WRAP
         self._apply_wrap(wrap)
 
+    def _update_memo_colors(self):
+        if self.memo:
+            self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextBg, self.colmapbg['default']))
+            self.memo.set_prop(PROP_COLOR, (COLOR_ID_TextFont, self.colmapfg['default']))
 
     def _open_terminal(self, columns=1024, lines=24):
         # child gets pid=0, fd=invalid;
@@ -987,7 +991,7 @@ class TerminalBar:
         self._update_statusbar_cells_bg()
         self._update_term_icons()
 
-    def on_theme_change(self):
+    def on_theme_change(self, update_terminals=False):
         self._update_colors()
 
         self._update_statusbar_cells_bg()
@@ -1002,6 +1006,11 @@ class TerminalBar:
 
         #statusbar_proc(self.h_sb, STATUSBAR_SET_COLOR_BORDER_L, value=self.Cmd.color_tab_border_active)
         statusbar_proc(self.h_sb, STATUSBAR_SET_COLOR_BORDER_R, value=self.Cmd.color_tab_border_active)
+
+        if update_terminals:
+            for term in self.terminals:
+                if term is not self.active_term:
+                    term.dirty = True
 
     def on_exit(self):
         for term in self.terminals:
@@ -1184,6 +1193,7 @@ class Command:
         self.terminal_w = 2048 # - unlimited?
         self.termbar = None
 
+        self._get_theme_colors()
         self._load_config()
 
         self.load_history()
@@ -1203,8 +1213,43 @@ class Command:
         self.color_tab_passive = colors['TabPassive']['color']
         self.color_tab_border_active = colors['TabBorderActive']['color']
         self.color_tab_border_passive = colors['TabBorderPassive']['color']
+        self.color_ed_bg = colors['EdTextBg']['color']
+        self.color_ed_fg = colors['EdTextFont']['color']
 
         return colors
+
+    def _load_term_theme(self):
+        """ return True if using editor colors
+        """
+        colnames = ['black', 'red', 'green', 'brown', 'blue', 'magenta', 'cyan', 'white', 'brightblack',
+            'brightred', 'brightgreen', 'brightbrown', 'brightblue', 'brightmagenta', 'brightcyan',
+            'brightwhite', 'default', ]
+
+        fg_spl = self.theme_str_fg.split(',')
+        bg_spl = self.theme_str_bg.split(',')
+        if len(colnames) == len(fg_spl) and len(colnames) == len(bg_spl):
+            using_ed_col = False
+            for i,(name,s_fg,s_bg) in enumerate(zip(colnames, fg_spl, bg_spl)):
+                try:
+                    fgcol = html_color_to_int(s_fg)
+                except Exception:
+                    if len(colnames)-1 != i:
+                        raise
+                    fgcol = self.color_ed_fg
+                    using_ed_col = True
+
+                try:
+                    bgcol = html_color_to_int(s_bg)
+                except Exception:
+                    if len(colnames)-1 != i:
+                        raise
+                    bgcol = self.color_ed_bg
+                    using_ed_col = True
+
+                self.colmapfg[name] = fgcol
+                self.colmapbg[name] = bgcol
+
+            return using_ed_col
 
     def _open_init(self):
         self.h_dlg, self.h_panels_parent = self._init_form()
@@ -1238,8 +1283,6 @@ class Command:
         timer_proc(TIMER_START, self.timer_update, 200, tag='')
 
     def _init_form(self):
-        self._get_theme_colors()
-
         cur_font_size = self.font_size
 
         h = dlg_proc(0, DLG_CREATE)
@@ -1380,17 +1423,9 @@ class Command:
         self.layout_horizontal = str_to_bool(ini_read(fn_config, 'op', 'layout_horizontal', '0'))
 
         # theme
-        colnames = ['black', 'red', 'green', 'brown', 'blue', 'magenta', 'cyan', 'white', 'brightblack',
-                    'brightred', 'brightgreen', 'brightbrown', 'brightblue', 'brightmagenta', 'brightcyan',
-                    'brightwhite', 'default', ]
         self.theme_str_fg = ini_read(fn_config, 'op', 'shell_theme_fg', SHELL_THEME_FG)
         self.theme_str_bg = ini_read(fn_config, 'op', 'shell_theme_bg', SHELL_THEME_BG)
-        fg_intcols = [html_color_to_int(col) for col in self.theme_str_fg.split(',')]
-        bg_intcols = [html_color_to_int(col) for col in self.theme_str_bg.split(',')]
-        if len(colnames) == len(fg_intcols) and len(colnames) == len(bg_intcols):
-            for name,fgcol,bgcol in zip(colnames, fg_intcols, bg_intcols):
-                self.colmapfg[name] = fgcol
-                self.colmapbg[name] = bgcol
+        self._load_term_theme()
 
         self._layout = ALIGN_RIGHT  if self.layout_horizontal else  ALIGN_TOP
 
@@ -1760,6 +1795,12 @@ class Command:
     def on_statusbar_cell_click(self, id_dlg, id_ctl, data='', info=''):
         self.termbar.on_statusbar_cell_click(id_dlg, id_ctl, data, info)
 
+        if self.termbar.active_term  and  self.termbar.active_term.dirty:
+            self.termbar.active_term.dirty = False
+            self.termbar.active_term._update_memo_colors()
+            self.termbar.active_term._ansicache.clear()
+            self.update_output()
+
     def on_statusbar_menu(self, id_dlg, id_ctl, data='', info=''):
         self.termbar.on_statusbar_menu(id_dlg, id_ctl, data, info)
 
@@ -1916,6 +1957,7 @@ class Command:
     def on_state(self, ed, state):
         if self.h_dlg and state == APPSTATE_THEME_UI:
             colors = self._get_theme_colors()
+            update_memos = self._load_term_theme()
 
             dlg_proc(self.h_dlg, DLG_PROP_SET, prop={
                 'color': self.color_btn_back,
@@ -1933,7 +1975,12 @@ class Command:
                         self.input.set_prop(PROP_COLOR, (theme_item_name, theme_col))
 
             if self.termbar:
-                self.termbar.on_theme_change()
+                self.termbar.on_theme_change(update_terminals=update_memos)
+                if update_memos  and  self.termbar.active_term  and  self.termbar.active_term.btext:
+                    self.termbar.active_term.dirty = False
+                    self.termbar.active_term._update_memo_colors()
+                    self.termbar.active_term._ansicache.clear()
+                    self.update_output()
 
     def on_exit(self, ed_self):
         self._save_state()
