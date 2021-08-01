@@ -1932,6 +1932,28 @@ class Command:
             self.recall_cmd()
             return False
 
+        #Alt+Down/Up: cucle through history
+        elif id_ctl in [keys.VK_UP, keys.VK_DOWN]  and  data == 'a':
+            hist = self.get_history_items()
+            if not hist:
+                return False
+            txt = self.input.get_text_all()
+            _is_up = (id_ctl == keys.VK_UP)
+
+            try:
+                _ind = hist.index(txt)
+                _ind_new = _ind+1  if _is_up else  _ind-1
+                if _ind_new < 0:             new_txt = txt
+                elif _ind_new >= len(hist):  new_txt = hist[-1]
+                else:                        new_txt = hist[_ind_new]
+            except ValueError:
+                new_txt = ''  if _is_up else  hist[-1]
+
+            self.input.set_text_all(new_txt)
+            self.input.set_caret(0,0, len(new_txt),0)
+
+            return False
+
         #elif (id_ctl==keys.VK_RIGHT) and (data=='s'):
         #elif (id_ctl==keys.VK_LEFT) and (data=='s'):
         # _dbg_toggle_term_hide...
