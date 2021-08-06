@@ -1605,7 +1605,7 @@ class Command:
         """
         term = self.termbar.get_active_term()
         if IS_WIN:
-            return term.btext.decode(ENC), {}
+            return term.btext.decode(ENC, errors='replace'), {}
 
         blines = term.btext.split(b'\n')
 
@@ -1621,7 +1621,7 @@ class Command:
                 cache_used[bline] = collines_l
             else:
                 try:
-                    line = bline.decode(ENC)
+                    line = bline.decode(ENC, errors='replace')
                     linelen = len(line) + 8*line.count('\t')
                 except UnicodeDecodeError as ex:
                     if bline == blines[0]: # string's bytes were cut off => invalid unicode -- skip first line
