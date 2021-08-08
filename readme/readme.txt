@@ -129,7 +129,7 @@ Plugin options
        bright-magenta
        bright-cyan
        bright-white
-       default
+       default -- can be '-' to use CudaText theme main colors
 - 'shell_theme_bg': Terminal background colors. Same format as 'shell_theme_fg'.
 
 - 'terminal_bg_zebra': Difference in "brightness" between adjacent groups

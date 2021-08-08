@@ -1,3 +1,9 @@
+2021.08.01
++ add: hotkeys Alt+Up / Alt+Down, in the input field, cycle through input history
+
+2021.07.31
++ add: allow to use CudaText theme main colors - when last color in shell theme config is '-'
+
 2021.07.27
 + add: option "lock_horizontal_scroll"
 
