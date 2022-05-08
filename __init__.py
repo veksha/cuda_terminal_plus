@@ -634,7 +634,7 @@ class TerminalBar:
             # add if need more sidebar tabs
             if i >= len(self.sidebar_names):
                 if not self.Cmd.floating: # sidebar icons are useless when .floating=True
-                    app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (panelname, self.h_dlg, None))
+                    app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (panelname, self.h_dlg, fn_icon))
                 self.sidebar_names.append(panelname)
 
             # sidebar hint
