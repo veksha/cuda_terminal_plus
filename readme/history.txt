@@ -1,3 +1,7 @@
+
+2022.05.08
+- fix: if terminal is 'floating', don't toggle CudaText bottom panel on a) Esc-key, b) "Rename terminal", c) "Close all terminals" (by Alexey T.)
+
 2021.08.01
 + add: hotkeys Alt+Up / Alt+Down, in the input field, cycle through input history
 
