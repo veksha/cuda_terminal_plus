@@ -1561,9 +1561,10 @@ class Command:
     def ensure_shown(self):
         if not self._is_shown:
             self.open()
-        if not app_proc(PROC_SHOW_BOTTOMPANEL_GET, ''):
-            app_proc(PROC_SHOW_BOTTOMPANEL_SET, True)
-            self.queue_focus_input(force=True)
+        if not self.floating:
+            if not app_proc(PROC_SHOW_BOTTOMPANEL_GET, ''):
+                app_proc(PROC_SHOW_BOTTOMPANEL_SET, True)
+                self.queue_focus_input(force=True)
 
     def timer_update(self, tag='', info=''):
         changed = self.termbar.timer_update()
@@ -1920,7 +1921,8 @@ class Command:
             # Stops the timer
             timer_proc(TIMER_STOP, self.timer_update, 0)
             ed.focus()
-            ed.cmd(cmds.cmd_ToggleBottomPanel)
+            if not self.floating:
+                ed.cmd(cmds.cmd_ToggleBottomPanel)
             return False
 
         #Break or Ctrl+C (cannot react to Ctrl+Break)
