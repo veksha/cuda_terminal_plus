@@ -1106,7 +1106,8 @@ class TerminalBar:
                     txt = ed.get_text_line(caret_y).rstrip('\n')
                     if txt:
                         self.Cmd.run_cmd(txt)
-                    ed.set_caret(caret_x, caret_y+1)
+                    if caret_y+1 < ed.get_line_count():
+                        ed.set_caret(caret_x, caret_y+1)
 
         elif cmd == CMD_RENAME:
             termind = vargs.get('ind', -1) # -1 - current
