@@ -928,8 +928,15 @@ class TerminalBar:
         for term in [*self.terminals]:
             self.remove_term(term)
         self.refresh()
+
         if not self.Cmd.floating:
             activate_bottompanel(self.sidebar_names[0])
+
+        # clear memo
+        ed_ = self.Cmd.memo
+        ed_.set_prop(PROP_RO, False)
+        ed_.set_text_all('')
+        ed_.set_prop(PROP_RO, True)
 
     def new_term(self, filepath):
         log('* new term for: ' + str(filepath))
