@@ -6,7 +6,7 @@ IS_WIN = os.name=='nt'
 IS_MAC = sys.platform=='darwin'
 
 from time import sleep, time
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import Popen, PIPE, STDOUT, call, STARTUPINFO, STARTF_USESHOWWINDOW
 from threading import Thread, Lock
 from collections import namedtuple
 import json
@@ -388,8 +388,13 @@ class Terminal:
         if ch_out:
             ch_out.close()
         if self.p:
-            self.p.terminate()
-            self.p.wait()
+            if IS_WIN:
+                startupinfo = STARTUPINFO()
+                startupinfo.dwFlags |= STARTF_USESHOWWINDOW
+                call(['taskkill', '/F', '/T', '/PID',  str(self.p.pid)], startupinfo=startupinfo)
+            else:
+                self.p.terminate()
+                self.p.wait()
 
 
     def restart_shell(self):
