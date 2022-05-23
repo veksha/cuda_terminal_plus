@@ -366,7 +366,10 @@ class Terminal:
             dlg_proc(self.h_dlg, DLG_CTL_PROP_SET, name=self.memo_wgt_name, prop={'vis':False})
 
     def exit(self):
-        self.memo = None
+        if self.memo:
+            self.memo = None
+            dlg_proc(self.h_dlg, DLG_CTL_DELETE, name=self.memo_wgt_name)
+
         self.stop_t = True # stop thread
         self.stop()
 
@@ -903,9 +906,6 @@ class TerminalBar:
     def remove_term(self, term, show_next=False):
         term.exit()
 
-        if term.memo:
-            dlg_proc(self.h_dlg, DLG_CTL_DELETE, name=term.memo_wgt_name)
-
         if term in self.terminals:
             if show_next:
                 curterms = [t for t in self.terminals  if t.filepath == term.filepath]
@@ -936,12 +936,6 @@ class TerminalBar:
 
         if not self.Cmd.floating:
             activate_bottompanel(self.sidebar_names[0])
-
-        # clear memo
-        ed_ = self.Cmd.memo
-        ed_.set_prop(PROP_RO, False)
-        ed_.set_text_all('')
-        ed_.set_prop(PROP_RO, True)
 
     def new_term(self, filepath):
         log('* new term for: ' + str(filepath))
