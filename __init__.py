@@ -6,7 +6,9 @@ IS_WIN = os.name=='nt'
 IS_MAC = sys.platform=='darwin'
 
 from time import sleep, time
-from subprocess import Popen, PIPE, STDOUT, call, STARTUPINFO, STARTF_USESHOWWINDOW
+from subprocess import Popen, PIPE, STDOUT, call
+if IS_WIN:
+    from subprocess import STARTUPINFO, STARTF_USESHOWWINDOW
 from threading import Thread, Lock
 from collections import namedtuple
 import json
