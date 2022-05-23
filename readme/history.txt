@@ -1,4 +1,8 @@
 
+2022.05.23
+- fix: memory leak after opening+closing many terminals (by @veksha)
+- fix: on Windows, better close Cmd processes (by @veksha)
+
 2022.05.08
 - fix: if terminal is 'floating', don't toggle CudaText bottom panel on a) Esc-key, b) "Rename terminal", c) "Close all terminals" (by Alexey T.)
 - fix: on "Close all terminals", clear the terminal (by Alexey T.) 
