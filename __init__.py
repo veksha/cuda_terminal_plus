@@ -1077,7 +1077,7 @@ class TerminalBar:
 
                             self.Cmd.queue_focus_input(force=True)
                         else:
-                            print(_('Document has no teminals: ')+filepath)
+                            print(_('Document has no terminals: ')+filepath)
 
             elif is_term_focused: # focus terminal's editor if any
                 if self.active_term and self.active_term.filepath:
@@ -1126,7 +1126,7 @@ class TerminalBar:
                 term = self.active_term
 
             if term:
-                newname = dlg_input(_('Rename Terminal'), term.name)
+                newname = dlg_input(_('Rename terminal:'), term.name)
                 if newname is not None:
                     term.name = newname
                     self.refresh()
