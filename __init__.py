@@ -1278,8 +1278,10 @@ class Command:
             h_embed = dlg_proc(0, DLG_CREATE)
             n = dlg_proc(h_embed, DLG_CTL_ADD, prop='panel')
             dlg_proc(h_embed, DLG_CTL_PROP_SET, index=n, prop={
-                'color': 0xababab,
+                'name': 'panel_placeholder',
                 'cap': self.hint_float,
+                'color': self.color_btn_back,
+                'font_color': self.color_btn_font,
                 'align': ALIGN_CLIENT,
             })
             self.h_embed = h_embed
@@ -1994,6 +1996,10 @@ class Command:
             colors = self._get_theme_colors()
             update_memos = self._load_term_theme()
 
+            dlg_proc(self.h_embed, DLG_CTL_PROP_SET, name='panel_placeholder', prop={
+                'color': self.color_btn_back,
+                'font_color': self.color_btn_font,
+            })
             dlg_proc(self.h_dlg, DLG_PROP_SET, prop={
                 'color': self.color_btn_back,
             })
