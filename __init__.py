@@ -1288,6 +1288,8 @@ class Command:
             self.h_embed = None
 
         app_proc(PROC_BOTTOMPANEL_ADD_DIALOG, (self.title, h_embed, fn_icon))
+        if self.floating: # fixes empty bottom panel on start (when floating)
+            activate_bottompanel(self.termbar.get_active_sidebar())
 
         timer_proc(TIMER_START, self.timer_update, 200, tag='')
 
