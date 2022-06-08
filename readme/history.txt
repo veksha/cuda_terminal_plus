@@ -1,4 +1,7 @@
 
+2022.06.08
+- fix: with floating terminal, bottom placeholder panel was not themed (by @veksha)
+
 2022.05.23
 - fix: memory leak after opening+closing many terminals (by @veksha)
 - fix: on Windows, better close Cmd processes (by @veksha)
