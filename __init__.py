@@ -1,3 +1,15 @@
+# русские буквы, utf-8
+# русские буквы, utf-8
+# русские буквы, utf-8
+
+#import sys
+#sys.path.insert(0,'F:\\MySSDPrograms\\PyCharm 2020.1\\plugins\\python\\helpers\\pydev')
+#
+#import pydevd_pycharm
+#try:
+#    pydevd_pycharm.settrace('localhost', port=1530, stdoutToServer=True, stderrToServer=True)
+#except: pass
+
 import sys
 import datetime
 import os
