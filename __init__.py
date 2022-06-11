@@ -1618,8 +1618,9 @@ class Command:
         """ parses terminal output bytes line-by-line, caching parsing-results per line
         """
         term = self.termbar.get_active_term()
-        if IS_WIN:
-            return term.btext.decode(ENC, errors='replace'), {}
+#        # uncomment this to disable Escape Sequences on Windows
+#        if IS_WIN:
+#            return term.btext.decode(ENC, errors='replace'), {}
 
         blines = term.btext.split(b'\n')
 
@@ -1645,6 +1646,8 @@ class Command:
 
                 terminal = AnsiParser(columns=linelen, lines=1, p_in=None)
                 terminal.screen.dirty.clear()
+                if IS_WIN: # `line` variable contains decoded text, use it
+                    bline = bytes(line,'utf-8')
                 terminal.feed(bline)
                 tiles = terminal.get_line_tiles() # (data, fg, bg, bold, reverse)
 
