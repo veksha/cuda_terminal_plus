@@ -1607,7 +1607,6 @@ class Command:
 
     # called on timer, if .btext changed
     def update_output(self):
-        print('updating...')
         term = self.termbar.get_active_term()
         full_text, range_lists = self.parse_ansi_lines()
 
@@ -1968,15 +1967,15 @@ class Command:
 
     def form_key_press(self, id_dlg, id_ctl, data='', info=''):
         term = self.termbar.get_active_term()
-        key = id_ctl
-        if (ord(' ') <= key <= 0x7E):
-            if term.memo.get_prop(PROP_FOCUSED):
-                if self.cl_offset_local() < 0:
-                    return False
-                self.cl_insert_char(chr(key))
+        if term.memo.get_prop(PROP_FOCUSED):
+            if self.cl_offset_local() < 0:
                 return False
+            self.cl_insert_char(chr(id_ctl))
+            self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-1)
+            return False
 
     def form_key_down(self, id_dlg, id_ctl, data='', info=''):
+
 
         term = self.termbar.get_active_term()
 
@@ -1996,8 +1995,6 @@ class Command:
 #                term.command_line = self.memo.get_text_substr(caret_x, caret_y,
 #                                                              caret_x+len(term.command_line), caret_y)
 
-                print('running: ',term.command_line)
-                print(caret_x,caret_y)
                 line = term.command_line
                 term.command_line = ''
                 self.run_cmd(line)
