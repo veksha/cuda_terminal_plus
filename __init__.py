@@ -266,6 +266,8 @@ class Terminal:
         self.memo = None
         self.dirty = False
 
+        self.command_line = ''
+
     def _init_memo(self):
         self.memo_wgt_name = Terminal._get_memo_name()
 
@@ -1315,6 +1317,7 @@ class Command:
             'border': False,
             'keypreview': True,
             'on_key_down': self.form_key_down,
+            'on_key_press': self.form_key_press,
             'on_show': self.form_show,
             'on_hide': self.form_hide,
             'color': self.color_btn_back,
@@ -1370,6 +1373,7 @@ class Command:
             'a_t': ('break', '-'),
             'font_size': cur_font_size,
             'texthint': _('Enter command here'),
+            'vis': False,
             })
         self.input = Editor(dlg_proc(h, DLG_CTL_HANDLE, index=n))
 
@@ -1402,12 +1406,15 @@ class Command:
         term = self.termbar.get_active_term()
 
         if IS_WIN:
-            if term.p and s:
-                term.p.stdin.write((s+'\n').encode(ENC))
+            if term.p:
+                s = s + '\n'
+                term.p.stdin.write((s).encode(ENC))
                 term.p.stdin.flush()
         else:
-            if term.ch_out and s:
-                term.ch_out.write((s+'\n').encode(ENC))
+            if term.ch_out:
+                s = s + '\n'
+                term.ch_out.write((s).encode(ENC))
+
 
     def _load_state(self):
         if os.path.exists(fn_state):
@@ -1599,16 +1606,20 @@ class Command:
 
     # called on timer, if .btext changed
     def update_output(self):
+        term = self.termbar.get_active_term()
         full_text, range_lists = self.parse_ansi_lines()
 
         h_pos = self.memo.get_prop(PROP_SCROLL_HORZ)  if LOCK_H_SCROLL else  None
 
         self.memo.set_prop(PROP_RO, False)
-        self.memo.set_text_all(full_text)
+        self.memo.set_text_all('')
+#        self.memo.set_text_all(full_text)
+        self.memo.insert(0,self.memo.get_line_count()+1,full_text)
         self.apply_colors(range_lists)
         self.memo.set_prop(PROP_RO, True)
 
         self.memo.cmd(cmds.cCommand_GotoTextEnd)
+
         self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-3)
         if h_pos is not None:
             h_pos = self.memo.set_prop(PROP_SCROLL_HORZ, h_pos)
@@ -1733,8 +1744,11 @@ class Command:
 
         if n < len(hist):
             s = hist[n]
-            self.input.set_text_all(s)
-            self.input.set_caret(len(s), 0)
+            if dlg_proc(self.h_dlg, DLG_CTL_PROP_GET, name='input')['vis']:
+                self.input.set_text_all(s)
+                self.input.set_caret(len(s), 0)
+            else:
+                self.cl_replace_all(s)
 
     def recall_cmd(self):
         if not self.is_shown():
@@ -1803,7 +1817,8 @@ class Command:
         return hist
 
     def queue_focus_input(self, force=False):
-        focus_input = lambda tag: (self.input.focus()  if force or self.is_focused() else None)
+        obj = self.input if dlg_proc(self.h_dlg, DLG_CTL_PROP_GET, name='input')['vis'] else self.memo
+        focus_input = lambda tag: (obj.focus()  if force or self.is_focused() else None)
         timer_proc(TIMER_START_ONE, focus_input, 300, tag='')
 
     def is_focused(self):
@@ -1899,14 +1914,83 @@ class Command:
             self.input.set_text_all(snippet_text)
             self.input.set_caret(len(snippet_text), 0)
 
+    def cl_offset(self):
+        term = self.termbar.get_active_term()
+        carets = term.memo.get_carets()
+        x, y, _, _ = carets[0]
+        return term.memo.convert(CONVERT_CARET_TO_OFFSET, x, y)
+
+    def cl_offset_local(self):
+        term = self.termbar.get_active_term()
+        return len(term.command_line) - (len(term.memo.get_text_all()) - self.cl_offset())
+
+    def cl_caret_inside(self):
+        term = self.termbar.get_active_term()
+        return len(term.command_line) > self.cl_offset_local() >= 0
+
+    def cl_insert_char(self,character):
+        term = self.termbar.get_active_term()
+        offset = self.cl_offset()
+        column, line = term.memo.convert(CONVERT_OFFSET_TO_CARET, offset, 0)
+        term.memo.set_prop(PROP_RO, False)
+        term.memo.insert(column, line, character)
+        term.memo.set_prop(PROP_RO, True)
+        term.memo.set_caret(*term.memo.convert(CONVERT_OFFSET_TO_CARET, offset+1, 0))
+        term.command_line += character
+
+    def cl_do_backspace(self):
+        term = self.termbar.get_active_term()
+        term.memo.set_prop(PROP_RO, False)
+        term.memo.cmd(cmds.cCommand_KeyBackspace) # TODO: this has drawbacks
+        term.memo.set_prop(PROP_RO, True)
+
+    def cl_do_delete(self):
+        term = self.termbar.get_active_term()
+        term.memo.set_prop(PROP_RO, False)
+        term.memo.cmd(cmds.cCommand_KeyDelete) # TODO: this has drawbacks
+        term.memo.set_prop(PROP_RO, True)
+
+    def cl_replace_all(self,text):
+        term = self.termbar.get_active_term()
+        caret_x,caret_y = term.memo.convert(CONVERT_OFFSET_TO_CARET,
+                                len(term.memo.get_text_all())-len(term.command_line), 0)
+        term.memo.set_prop(PROP_RO, False)
+        term.memo.replace(caret_x, caret_y, caret_x+len(term.command_line), caret_y, text)
+        term.memo.set_prop(PROP_RO, True)
+        term.command_line = text
+
+    def form_key_press(self, id_dlg, id_ctl, data='', info=''):
+        term = self.termbar.get_active_term()
+        key = id_ctl
+        print(key)
+        if (ord(' ') <= key <= 0x7E):
+            if term.memo.get_prop(PROP_FOCUSED):
+                if self.cl_offset_local() < 0:
+                    return False
+                self.cl_insert_char(chr(key))
+                return False
+
     def form_key_down(self, id_dlg, id_ctl, data='', info=''):
+
+        term = self.termbar.get_active_term()
+
         #Enter
         if (id_ctl==keys.VK_ENTER) and (data==''):
-            text = self.input.get_text_line(0)
-            self.input.set_text_all('')
-            self.input.set_caret(0, 0)
-            self.run_cmd(text)
-            return False
+            if self.input.get_prop(PROP_FOCUSED):
+                text = self.input.get_text_line(0)
+                self.input.set_text_all('')
+                self.input.set_caret(0, 0)
+                self.run_cmd(text)
+                return False
+            elif term.memo.get_prop(PROP_FOCUSED):
+                caret_x,caret_y = self.memo.convert(CONVERT_OFFSET_TO_CARET,
+                                        len(self.memo.get_text_all())-len(term.command_line),
+                                        0)
+                term.command_line = self.memo.get_text_substr(caret_x, caret_y,
+                                                              caret_x+len(term.command_line), caret_y)
+                self.run_cmd(term.command_line)
+                term.command_line = ''
+                return False
 
         #Up/Down: scroll memo
         elif (id_ctl==keys.VK_UP) and (data==''):
@@ -1918,7 +2002,8 @@ class Command:
             if self.memo and self.termbar and self.termbar.active_term:
                 y,maxy = self.termbar.active_term.get_memo_sroll_vert()
                 if y >= maxy: # memo at the bottom - send arrow down
-                    self.termbar.active_term.ch_out.write(TERM_KEY_DOWN)
+                    if not IS_WIN: # ch_out is always None for Windows
+                        self.termbar.active_term.ch_out.write(TERM_KEY_DOWN)
                 else:
                     self.memo.cmd(cmds.cCommand_ScrollLineDown)
             return False
@@ -1933,7 +2018,8 @@ class Command:
             if self.memo and self.termbar and self.termbar.active_term:
                 y,maxy = self.termbar.active_term.get_memo_sroll_vert()
                 if y >= maxy: # memo at the bottom - send page down
-                    self.termbar.active_term.ch_out.write(TERM_KEY_PAGE_DOWN)
+                    if not IS_WIN: # ch_out is always None for Windows
+                        self.termbar.active_term.ch_out.write(TERM_KEY_PAGE_DOWN)
                 else:
                     self.memo.cmd(cmds.cCommand_ScrollPageDown)
             return False
@@ -1983,6 +2069,26 @@ class Command:
             self.input.set_caret(0,0, len(new_txt),0)
 
             return False
+
+        elif (id_ctl==keys.VK_BACKSPACE):
+            if term.memo.get_prop(PROP_FOCUSED) and term.command_line != '':
+                if self.cl_offset_local() > 0:
+                    self.cl_do_backspace()
+                    term.command_line = term.command_line[:-1]
+                    return False
+
+        elif (id_ctl==keys.VK_DELETE):
+            if term.memo.get_prop(PROP_FOCUSED) and term.command_line != '':
+                if self.cl_caret_inside():
+                    self.cl_do_delete()
+                    term.command_line = term.command_line[:-1]
+                    return False
+
+#        elif (id_ctl==keys.VK_RIGHT):
+#            if term.memo.get_prop(PROP_FOCUSED):
+#
+#        elif (id_ctl==keys.VK_LEFT):
+#            if term.memo.get_prop(PROP_FOCUSED):
 
         #elif (id_ctl==keys.VK_RIGHT) and (data=='s'):
         #elif (id_ctl==keys.VK_LEFT) and (data=='s'):
