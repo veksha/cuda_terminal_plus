@@ -201,8 +201,10 @@ class ControlTh(Thread):
                     sleep(0.5)
                     continue
                 pp1 = self.Cmd.p.stdout.tell()
+                print('pp1',pp1)
                 self.Cmd.p.stdout.seek(0, 2)
                 pp2 = self.Cmd.p.stdout.tell()
+                print('pp2',pp2)
                 self.Cmd.p.stdout.seek(pp1)
                 if self.Cmd.p.poll() is not None:
                     s = MSG_ENDED.encode(ENC)
@@ -210,6 +212,7 @@ class ControlTh(Thread):
                     # don't break, shell will be restarted
                 elif pp2!=pp1:
                     s = self.Cmd.p.stdout.read(pp2-pp1)
+                    print('s',s)
                     self.add_buf(s, False)
                 sleep(0.02)
 
@@ -1750,6 +1753,7 @@ class Command:
                 self.input.set_caret(len(s), 0)
             else:
                 self.cl_replace_all(s)
+                self.memo.cmd(cmds.cCommand_GotoTextEnd)
 
     def recall_cmd(self):
         if not self.is_shown():
@@ -1927,18 +1931,18 @@ class Command:
 
     def cl_caret_inside(self):
         term = self.termbar.get_active_term()
-        return len(term.command_line) > self.cl_offset_local() >= 0
+        return len(term.command_line) >= self.cl_offset_local() >= 0
 
-    def cl_insert_char(self,character):
+    def cl_insert(self, text):
         term = self.termbar.get_active_term()
         offset = self.cl_offset()
-        column, line = term.memo.convert(CONVERT_OFFSET_TO_CARET, offset, 0)
+        x, y = term.memo.convert(CONVERT_OFFSET_TO_CARET, offset, 0)
         term.memo.set_prop(PROP_RO, False)
-        term.memo.insert(column, line, character)
+        term.memo.insert(x, y, text)
         term.memo.set_prop(PROP_RO, True)
-        term.memo.set_caret(*term.memo.convert(CONVERT_OFFSET_TO_CARET, offset+1, 0))
+        term.memo.set_caret(*term.memo.convert(CONVERT_OFFSET_TO_CARET, offset+len(text), 0))
         pos = self.cl_offset_local()
-        term.command_line = term.command_line[:pos] + character + term.command_line[pos:]
+        term.command_line = term.command_line[:pos] + text + term.command_line[pos:]
 
     def cl_do_backspace(self):
         term = self.termbar.get_active_term()
@@ -1958,10 +1962,10 @@ class Command:
 
     def cl_replace_all(self,text):
         term = self.termbar.get_active_term()
-        caret_x,caret_y = term.memo.convert(CONVERT_OFFSET_TO_CARET,
+        x, y = term.memo.convert(CONVERT_OFFSET_TO_CARET,
                                 len(term.memo.get_text_all())-len(term.command_line), 0)
         term.memo.set_prop(PROP_RO, False)
-        term.memo.replace(caret_x, caret_y, caret_x+len(term.command_line), caret_y, text)
+        term.memo.replace(x, y, x+len(term.command_line), y, text)
         term.memo.set_prop(PROP_RO, True)
         term.command_line = text
 
@@ -1970,7 +1974,7 @@ class Command:
         if term.memo.get_prop(PROP_FOCUSED):
             if self.cl_offset_local() < 0:
                 return False
-            self.cl_insert_char(chr(id_ctl))
+            self.cl_insert(chr(id_ctl))
             self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-1)
             return False
 
@@ -2086,15 +2090,15 @@ class Command:
 
         elif (id_ctl==keys.VK_DELETE):
             if term.memo.get_prop(PROP_FOCUSED) and term.command_line != '':
-                if self.cl_caret_inside():
+                if len(term.command_line) > self.cl_offset_local() >= 0:
                     self.cl_do_delete()
                     return False
 
-#        elif (id_ctl==keys.VK_RIGHT):
-#            if term.memo.get_prop(PROP_FOCUSED):
-#
-#        elif (id_ctl==keys.VK_LEFT):
-#            if term.memo.get_prop(PROP_FOCUSED):
+        elif (id_ctl==keys.VK_INSERT and data == 's'):
+            if term.memo.get_prop(PROP_FOCUSED):
+                if self.cl_caret_inside():
+                    self.cl_insert(app_proc(PROC_GET_CLIP, ''))
+
 
         #elif (id_ctl==keys.VK_RIGHT) and (data=='s'):
         #elif (id_ctl==keys.VK_LEFT) and (data=='s'):
