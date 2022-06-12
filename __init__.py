@@ -1361,6 +1361,7 @@ class Command:
             'cap': _('Break'),
             'hint': _('Hotkeys: Break or Ctrl+C'),
             'on_change': self.button_break_click,
+            'vis': False,
             })
 
         n = dlg_proc(h, DLG_CTL_ADD, 'editor_combo')
@@ -1539,9 +1540,9 @@ class Command:
     # applies layout properties, starts timer to set statusbar width to w of its children
     def _apply_layout_orientation(self, h_dlg, layout):
         if layout == ALIGN_TOP: # vertical
-            parent_h = INPUT_H + TERMBAR_H + 4
+            parent_h = 0#INPUT_H + TERMBAR_H + 4
         else: # horizontal
-            parent_h = max(INPUT_H, TERMBAR_H)
+            parent_h = 0#max(INPUT_H, TERMBAR_H)
 
             self._queue_layout_controls()
 
@@ -1613,15 +1614,15 @@ class Command:
         h_pos = self.memo.get_prop(PROP_SCROLL_HORZ)  if LOCK_H_SCROLL else  None
 
         self.memo.set_prop(PROP_RO, False)
-        self.memo.set_text_all('')
-#        self.memo.set_text_all(full_text)
-        self.memo.insert(0,self.memo.get_line_count()+1,full_text)
+        self.memo.set_text_all(full_text)
+#        self.memo.set_text_all('')
+#        self.memo.insert(0,self.memo.get_line_count()+1,full_text)
         self.apply_colors(range_lists)
         self.memo.set_prop(PROP_RO, True)
 
         self.memo.cmd(cmds.cCommand_GotoTextEnd)
 
-        self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-3)
+#        self.memo.set_prop(PROP_LINE_TOP, self.memo.get_line_count()-3)
         if h_pos is not None:
             h_pos = self.memo.set_prop(PROP_SCROLL_HORZ, h_pos)
 
@@ -1937,19 +1938,24 @@ class Command:
         term.memo.insert(column, line, character)
         term.memo.set_prop(PROP_RO, True)
         term.memo.set_caret(*term.memo.convert(CONVERT_OFFSET_TO_CARET, offset+1, 0))
-        term.command_line += character
+        pos = self.cl_offset_local()
+        term.command_line = term.command_line[:pos] + character + term.command_line[pos:]
 
     def cl_do_backspace(self):
         term = self.termbar.get_active_term()
         term.memo.set_prop(PROP_RO, False)
         term.memo.cmd(cmds.cCommand_KeyBackspace) # TODO: this has drawbacks
         term.memo.set_prop(PROP_RO, True)
+        pos = self.cl_offset_local()
+        term.command_line = term.command_line[:pos-1] + term.command_line[pos:]
 
     def cl_do_delete(self):
         term = self.termbar.get_active_term()
         term.memo.set_prop(PROP_RO, False)
         term.memo.cmd(cmds.cCommand_KeyDelete) # TODO: this has drawbacks
         term.memo.set_prop(PROP_RO, True)
+        pos = self.cl_offset_local()
+        term.command_line = term.command_line[:pos-1] + term.command_line[pos:]
 
     def cl_replace_all(self,text):
         term = self.termbar.get_active_term()
@@ -2079,14 +2085,12 @@ class Command:
             if term.memo.get_prop(PROP_FOCUSED) and term.command_line != '':
                 if self.cl_offset_local() > 0:
                     self.cl_do_backspace()
-                    term.command_line = term.command_line[:-1]
                     return False
 
         elif (id_ctl==keys.VK_DELETE):
             if term.memo.get_prop(PROP_FOCUSED) and term.command_line != '':
                 if self.cl_caret_inside():
                     self.cl_do_delete()
-                    term.command_line = term.command_line[:-1]
                     return False
 
 #        elif (id_ctl==keys.VK_RIGHT):
